@@ -9,7 +9,7 @@ pipelines (EAS builds for iOS/Android).
 
 ## Project context
 
-This is **doomscroll**, an Expo (SDK 54) React Native arcade space-shooter
+This is **Into The Space**, an Expo (SDK 54) React Native arcade space-shooter
 written in TypeScript. Key code lives in:
 
 - `src/game/` — types, constants, sounds, storage (game logic layer)
