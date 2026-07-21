@@ -1,0 +1,8 @@
+{
+  "cli": { "version": ">= 12.0.0", "appVersionSource": "remote" },
+  "build": {
+    "preview": { "distribution": "internal", "ios": { "simulator": true } },
+    "production": { "autoIncrement": true }
+  },
+  "submit": { "production": {} }
+}
