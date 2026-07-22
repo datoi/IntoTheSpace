@@ -241,3 +241,100 @@ describe('App — run lifecycle', () => {
     expect(screen.getByText('PAUSED')).toBeTruthy();
   });
 });
+
+describe('App — backgrounds economy', () => {
+  beforeEach(async () => {
+    await AsyncStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        best: 100,
+        likes: 200,
+        unlocked: ['ironclad'],
+        selectedAvatar: 'ironclad',
+        unlockedBackgrounds: ['violet'],
+        selectedBackground: 'violet',
+      })
+    );
+  });
+
+  it('buying a background deducts coins, unlocks, equips, and persists', async () => {
+    await bootApp();
+    await fireEvent.press(screen.getByText('SHOP'));
+    await fireEvent.press(screen.getByText('BACKGROUNDS'));
+    await fireEvent.press(screen.getByText('Deep Void')); // costs 90
+    expect(screen.getByText('110 coins')).toBeTruthy();
+    expect(screen.getByText('EQUIPPED')).toBeTruthy();
+    await advance(10);
+    const stored = JSON.parse((await AsyncStorage.getItem(SAVE_KEY))!);
+    expect(stored.likes).toBe(110);
+    expect(stored.unlockedBackgrounds).toContain('void');
+    expect(stored.selectedBackground).toBe('void');
+  });
+
+  it('cannot buy a background it cannot afford', async () => {
+    await bootApp();
+    await fireEvent.press(screen.getByText('SHOP'));
+    await fireEvent.press(screen.getByText('BACKGROUNDS'));
+    await fireEvent.press(screen.getByText('Crimson Cloud')); // 450 > 200
+    expect(screen.getByText('200 coins')).toBeTruthy();
+    await advance(10);
+    const stored = JSON.parse((await AsyncStorage.getItem(SAVE_KEY))!);
+    expect(stored.unlockedBackgrounds ?? ['violet']).not.toContain('crimson');
+  });
+
+  it('equipping an owned background persists the selection without cost', async () => {
+    await AsyncStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        best: 100,
+        likes: 200,
+        unlocked: ['ironclad'],
+        selectedAvatar: 'ironclad',
+        unlockedBackgrounds: ['violet', 'void'],
+        selectedBackground: 'violet',
+      })
+    );
+    await bootApp();
+    await fireEvent.press(screen.getByText('SHOP'));
+    await fireEvent.press(screen.getByText('BACKGROUNDS'));
+    await fireEvent.press(screen.getByText('Deep Void'));
+    await advance(10);
+    const stored = JSON.parse((await AsyncStorage.getItem(SAVE_KEY))!);
+    expect(stored.selectedBackground).toBe('void');
+    expect(stored.likes).toBe(200);
+  });
+});
+
+describe('App — remaining navigation & boot paths', () => {
+  it('Back to menu from the game over screen', async () => {
+    await AsyncStorage.setItem(RUN_KEY, JSON.stringify(doomedRun()));
+    await bootApp();
+    await fireEvent.press(screen.getByText('LIFT OFF 🚀'));
+    await fireEvent.press(screen.getByText('CONTINUE'));
+    await advance(300);
+    expect(screen.getByText('💥 ROCKET DOWN')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Back to menu'));
+    expect(screen.getByText('LIFT OFF 🚀')).toBeTruthy();
+  });
+
+  it('sprite decode releases the boot gate before the grace timer', async () => {
+    await render(<App />);
+    // Let storage + preload resolve and the minimum-time gate pass, but stay
+    // well short of DECODE_GRACE_MS.
+    await advance(MIN_LOADING_MS + 10);
+    expect(screen.queryByText('LIFT OFF 🚀')).toBeNull();
+
+    // Every prewarmed sprite reports painted — the decode signal, not the
+    // grace timer, must open the gate.
+    const fireLoads = () => {
+      const walk = (node: any) => {
+        if (!node || typeof node !== 'object') return;
+        if (node.type === 'Image') node.props.onLoad?.();
+        (node.children ?? []).forEach(walk);
+      };
+      walk(screen.toJSON());
+    };
+    await act(async () => fireLoads());
+    expect(screen.getByText('LIFT OFF 🚀')).toBeTruthy();
+  });
+});

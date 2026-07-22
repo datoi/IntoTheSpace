@@ -374,10 +374,12 @@ describe('GameScreen — escalating enemy behavior', () => {
 
   // The ship has to sit in the drop zone to land the kill, so part of the fan
   // is banked on the way down: the payout is what's still falling plus what
-  // has already been collected.
+  // has already been collected. The window covers the kill plus enough time for
+  // some coins to drift down through the ship — pickups fall at PICKUP_FALL_SCALE
+  // of world speed (~93px/s here), so this is longer than the drop is fast.
   const bossPayout = async (state: GameState) => {
     const { onPersist } = await renderGame(state);
-    await advance(400);
+    await advance(1200);
     await fireEvent.press(screen.getByText('❚❚'));
     const snap: GameState = onPersist.mock.calls[0][0];
     const falling = snap.cards.filter((c) => c.kind === 'coin' && !c.dead);
@@ -666,5 +668,53 @@ describe('GameScreen — pause / resume / navigation', () => {
     await advance(500); // any leaked rAF would fire against the unmounted tree
     expect(errors).not.toHaveBeenCalled();
     errors.mockRestore();
+  });
+});
+
+describe('GameScreen — zigzag fire & drag movement', () => {
+  it('wave 5+: enemy shots weave (zigzag kind with lateral sway)', async () => {
+    const resume = quietState({
+      wave: 5,
+      cards: [card({ y: 200, hp: 50, maxHp: 50 })], // directly above the player
+      enemyFireTimer: 0.01,
+    });
+    const { onPersist } = await renderGame(resume);
+    // Sample the same bullet at three moments via pause snapshots. A straight
+    // shot aimed dead-down has vx = 0 and would keep a constant x; the zigzag
+    // sway is the only thing that can move it laterally between samples.
+    const xs: number[] = [];
+    let bulletId: number | undefined;
+    await advance(500);
+    for (let i = 0; i < 3; i++) {
+      await fireEvent.press(screen.getByText('❚❚'));
+      const snap: GameState = onPersist.mock.calls[i][0];
+      expect(snap.enemyBullets.length).toBeGreaterThanOrEqual(1);
+      for (const b of snap.enemyBullets) {
+        expect(b.kind).toBe('zigzag');
+        expect(Number.isFinite(b.x)).toBe(true);
+        expect(b.vx).toBeCloseTo(0);
+      }
+      bulletId = bulletId ?? snap.enemyBullets[0].id;
+      const tracked = snap.enemyBullets.find((b) => b.id === bulletId);
+      if (tracked) xs.push(tracked.x);
+      await fireEvent.press(screen.getByText('CONTINUE'));
+      await advance(150);
+    }
+    expect(xs.length).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0.5);
+  });
+
+  it('a dragged rocket lerps to the target and clamps to the play area', async () => {
+    const resume = quietState({
+      dragging: true,
+      targetX: SCREEN.W * 2, // way past the right edge
+      targetY: -5000, // way past the top
+    });
+    const { onPersist } = await renderGame(resume);
+    await advance(500); // lerp fully converges, then clamps hold
+    await fireEvent.press(screen.getByText('❚❚'));
+    const snap: GameState = onPersist.mock.calls[0][0];
+    expect(snap.avatarX).toBe(SCREEN.W - FEED_PAD - AVATAR_SIZE / 2);
+    expect(snap.avatarY).toBe(60);
   });
 });

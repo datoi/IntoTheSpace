@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Image, StyleSheet, PanResponder, Pressable, AppState } from 'react-native';
+import { View, Text, Image, StyleSheet, PanResponder, Pressable, AppState, Animated } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import ObstacleView from '../components/Obstacle';
 import { ParticleView, FloatTextView, HUD, HealthBar } from '../components/Effects';
@@ -19,6 +19,7 @@ import {
   HEARTS_START,
   HEARTS_MAX,
   HEART_EVERY,
+  PICKUP_FALL_SCALE,
   COIN_EVERY,
   COIN_GOLD,
   COIN_VIS,
@@ -182,63 +183,116 @@ function claimedTargets(bullets: Bullet[], self: Bullet): Set<number> {
 
 const SPACE_BLACK = '#04060E';
 
-// One parallax background set: optional static base + layers scrolling down
-// at different speeds (far slowest → near fastest), driven by altitude.
-// Non-seamless art tiles with mirrored copies (scaleY: -1 on odd tiles) to
-// hide the seam; seamless tiles repeat plainly.
-function renderBgSet(set: BgSet, alt: number, alpha: number, keyPrefix: string): React.ReactNode {
-  const nodes: React.ReactNode[] = [];
-  if (set.base !== undefined) {
-    nodes.push(
-      <Image
-        key={`${keyPrefix}base`}
-        source={set.base}
-        resizeMode="cover"
-        fadeDuration={0}
-        style={{ position: 'absolute', left: 0, top: 0, width: SCREEN.W, height: SCREEN.H, opacity: alpha }}
-      />
-    );
-  }
+// Render cap. On a 90/120 Hz Android, requestAnimationFrame fires 90–120×/sec,
+// so the game would simulate and repaint that often — double the work and heat
+// of a 60 Hz phone for no visible gain. We skip vsyncs that arrive sooner than
+// this. The threshold sits safely under a 60 Hz frame (16.67 ms) so a true
+// 60 Hz display (e.g. the iPhone 16) never drops a frame; only faster panels
+// are throttled back toward ~60 fps.
+const FRAME_MIN_MS = 1000 / 70;
+
+// One parallax background set, mounted ONCE and scrolled entirely on the native
+// side. Each layer is a fixed vertical strip of tiles inside an Animated.View;
+// the game loop advances its translateY through an Animated.Value (see
+// bgAnims), so climbing scrolls the sky WITHOUT React re-rendering these
+// full-screen images every frame — that per-frame rebuild was a large slice of
+// the CPU/GPU cost. Non-seamless art alternates mirrored copies (scaleY: -1 on
+// odd tiles) to hide the seam; the strip is a whole number of tiles so the wrap
+// is invisible. React.memo keeps the whole subtree from reconciling on the
+// parent's per-frame renders (its props — the set and the anim array — are
+// stable for the run).
+const ParallaxBackground = React.memo(function ParallaxBackground({
+  set,
+  anims,
+}: {
+  set: BgSet;
+  anims: Animated.Value[];
+}) {
   const tileH = SCREEN.W * set.aspect;
-  // Tiles are keyed by a fixed ring of slots, NOT by tile index: as the offset
-  // grows the index walks downward, so keying by index unmounts the tile
-  // leaving the screen and mounts a fresh one at the other edge — and a fresh
-  // native Image paints blank until it decodes, which read as a background
-  // blink mid-scroll (fadeDuration=0 hid Android's fade-in but not the decode
-  // gap). Reusing a mounted Image just moves it; the source never re-decodes.
-  // The ring is even-sized so a slot's mirror parity, which follows the tile
-  // index's parity, stays constant across the wrap.
-  const ringBase = Math.ceil(SCREEN.H / tileH) + 2;
-  const ring = ringBase + (ringBase % 2);
-  for (let li = 0; li < set.layers.length; li++) {
-    const L = set.layers[li];
-    const o = alt * BG_PX_PER_M * L.speed;
-    // Tile n sits at y = n·tileH + o; o grows, tiles move down, n decreases
-    // over time. Cover the screen from the top edge down. Tiles are drawn 1px
-    // taller than their pitch so float rounding can't open hairline seams.
-    for (let n = Math.floor(-o / tileH); n * tileH + o < SCREEN.H; n++) {
-      const flipped = set.mirror && ((n % 2) + 2) % 2 === 1;
-      nodes.push(
+  const tilesNeeded = Math.ceil(SCREEN.H / tileH) + 3;
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {set.base !== undefined && (
         <Image
-          key={`${keyPrefix}l${li}_s${((n % ring) + ring) % ring}`}
-          source={L.src}
-          resizeMode="stretch"
+          source={set.base}
+          resizeMode="cover"
+          fadeDuration={0}
+          style={{ position: 'absolute', left: 0, top: 0, width: SCREEN.W, height: SCREEN.H }}
+        />
+      )}
+      {set.layers.map((L, li) => {
+        const tiles: React.ReactNode[] = [];
+        for (let i = 0; i < tilesNeeded; i++) {
+          const flipped = set.mirror && i % 2 === 1;
+          tiles.push(
+            <Image
+              key={i}
+              source={L.src}
+              resizeMode="stretch"
+              fadeDuration={0}
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: i * tileH - 0.5, // 1px overlap so rounding can't open a seam
+                width: SCREEN.W,
+                height: tileH + 1,
+                opacity: L.alpha,
+                transform: flipped ? [{ scaleY: -1 }] : undefined,
+              }}
+            />
+          );
+        }
+        return (
+          <Animated.View
+            key={li}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: -2 * tileH, // strip parked one wrap-period above; translateY brings it down
+              width: SCREEN.W,
+              height: tilesNeeded * tileH,
+              transform: [{ translateY: anims[li] }],
+            }}
+          >
+            {tiles}
+          </Animated.View>
+        );
+      })}
+    </View>
+  );
+});
+
+// Per-layer scroll period the loop wraps translateY within (so it never grows
+// unbounded): mirrored art repeats every 2 tiles (parity must stay consistent),
+// plain art every tile.
+const bgPeriod = (set: BgSet) => (set.mirror ? 2 : 1) * SCREEN.W * set.aspect;
+
+// Off-screen pre-warm: mount every projectile sprite once at its in-game size
+// so the native image cache is hot before the first shot (a cold Image view can
+// take frames to fetch/decode, which made fast bullets invisible near the ship).
+// Static for the run → memoized so it never reconciles on the per-frame render.
+const Prewarm = React.memo(function Prewarm({ avatarShot }: { avatarShot: ShotArt }) {
+  const shotThick = PLAYER_SHOT_LEN / avatarShot.aspect;
+  return (
+    <View pointerEvents="none" style={styles.prewarm}>
+      <Image source={avatarShot.src} fadeDuration={0} style={{ width: PLAYER_SHOT_LEN, height: shotThick }} />
+      <Image source={SHOT_HOMING_IMG} fadeDuration={0} style={{ width: SHOT_HOMING_LEN, height: SHOT_HOMING_THICK }} />
+      <Image source={SHOT_BOMB_IMG} fadeDuration={0} style={{ width: SHOT_BOMB_W, height: SHOT_BOMB_H }} />
+      <Image source={SHOT_LASER_IMG} fadeDuration={0} style={{ width: SHOT_LASER_LEN, height: SHOT_LASER_THICK }} />
+      {ENEMY_SHOTS.map((src, i) => (
+        <Image
+          key={i}
+          source={src}
           fadeDuration={0}
           style={{
-            position: 'absolute',
-            left: 0,
-            top: n * tileH + o - 0.5,
-            width: SCREEN.W,
-            height: tileH + 1,
-            opacity: L.alpha * alpha,
-            transform: flipped ? [{ scaleY: -1 }] : undefined,
+            width: ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE,
+            height: (ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE) / ENEMY_SHOT_ASPECT[i],
           }}
         />
-      );
-    }
-  }
-  return nodes;
-}
+      ))}
+    </View>
+  );
+});
 
 // How far from the avatar's center a touch still counts as grabbing it.
 const GRAB_RADIUS = 80;
@@ -259,6 +313,11 @@ export default function GameScreen({
   // Merge onto a fresh state so runs saved by an older build (missing newer
   // fields like enemyBullets) don't crash on resume.
   const g = useRef<GameState>(resume ? { ...fresh(), ...resume } : fresh());
+  // One Animated.Value per background layer, driving that layer's scroll. The
+  // loop calls setValue() each frame, which moves the native transform without
+  // a React re-render. Stable for the run (the run's background never changes),
+  // so <ParallaxBackground> stays memoized.
+  const bgAnims = useRef<Animated.Value[]>(background.layers.map(() => new Animated.Value(0)));
   const overRef = useRef(false);
   const pausedRef = useRef(!!startPaused);
   const [paused, setPaused] = useState(!!startPaused);
@@ -351,12 +410,20 @@ export default function GameScreen({
 
     const tick = (now: number) => {
       if (overRef.current || pausedRef.current) return;
-      if (!last) last = now;
+      // Keep the loop alive first, then decide whether this vsync earns a step.
+      raf = requestAnimationFrame(tick);
+      if (!last) {
+        last = now;
+        return;
+      }
+      // High-refresh cap: skip vsyncs that arrive faster than ~60 fps so a
+      // 90/120 Hz panel doesn't simulate and repaint twice as often (and run
+      // twice as hot) as a 60 Hz one.
+      if (now - last < FRAME_MIN_MS) return;
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       update(dt);
       setFrame((f) => f + 1);
-      raf = requestAnimationFrame(tick);
     };
 
     // Called to (re)start the loop after a pause; resets dt so no time jump.
@@ -398,6 +465,15 @@ export default function GameScreen({
       const r = Math.min(s.alt / RAMP_ALT, 1);
       s.alt += (ALT_RATE_MIN + (ALT_RATE_MAX - ALT_RATE_MIN) * r) * dt;
       const speed = BASE_SPEED + (MAX_SPEED - BASE_SPEED) * r;
+
+      // Scroll each parallax layer on the native side: set its translateY to the
+      // altitude-driven offset, wrapped within one repeat period. No React
+      // re-render — the background subtree stays mounted and memoized.
+      const bgP = bgPeriod(background);
+      for (let i = 0; i < bgAnims.current.length; i++) {
+        const off = s.alt * BG_PX_PER_M * background.layers[i].speed;
+        bgAnims.current[i].setValue(off % bgP);
+      }
 
       // Rocket sticks to the finger while dragging (tight lerp kills jitter
       // without feeling laggy), clamped to the play area.
@@ -498,8 +574,9 @@ export default function GameScreen({
             c.cx = SCREEN.W / 2 + Math.sin((s.elapsed - c.swayT0) * BOSS_SWAY_FREQ) * SCREEN.W * BOSS_SWAY_AMP;
           }
         } else {
-          // Pickups (heart / gift) fall down toward the player.
-          c.y += speed * dt;
+          // Pickups (heart / coin / gift) drift down slower than the world so
+          // you have time to line up under them.
+          c.y += speed * PICKUP_FALL_SCALE * dt;
         }
         // Hitbox centered on the (possibly charging) position.
         const hw = (c.w ?? OB_HIT) / 2;
@@ -679,7 +756,11 @@ export default function GameScreen({
           float(s.avatarX, s.avatarY - 40, '-1 💔', PALETTE.rage);
           continue; // consumed
         }
-        if (b.life > 0 && b.y < SCREEN.H + 30 && b.x > -40 && b.x < SCREEN.W + 40) {
+        // Cull on all four edges. Without the top bound, a homing rocket that
+        // overshoots the player upward — or a steep boss-fan shot — would live
+        // out its full life (up to 6s) as an off-screen node, iterated and
+        // re-rendered every frame right when the screen is busiest.
+        if (b.life > 0 && b.y > -40 && b.y < SCREEN.H + 30 && b.x > -40 && b.x < SCREEN.W + 40) {
           keptEnemyBullets.push(b);
         }
       }
@@ -892,8 +973,10 @@ export default function GameScreen({
   return (
     <View style={[styles.wrap, { backgroundColor: SPACE_BLACK }]} {...pan.panHandlers}>
       <View style={[styles.shakeLayer, { transform: [{ translateX: shakeX }, { translateY: shakeY }] }]}>
-        {/* One fixed environment for the whole run — the player's chosen background. */}
-        {renderBgSet(background, s.alt, 1, 'bg_')}
+        {/* One fixed environment for the whole run — the player's chosen
+            background. Scrolled on the native side via bgAnims (no per-frame
+            React render). */}
+        <ParallaxBackground set={background} anims={bgAnims.current} />
         {/* Dark scrim so gameplay reads clearly over the bright nebulae. */}
         <View
           pointerEvents="none"
@@ -907,27 +990,8 @@ export default function GameScreen({
             opacity: BG_DIM,
           }}
         />
-        {/* Hidden pre-warm: mount every projectile sprite once at its in-game
-            size so the native image cache is hot before the first shot —
-            a cold Image view can take frames to fetch/decode its source,
-            which made fast bullets invisible near the ship. */}
-        <View pointerEvents="none" style={styles.prewarm}>
-          <Image source={avatarShot.src} fadeDuration={0} style={{ width: shotLen, height: shotThick }} />
-          <Image source={SHOT_HOMING_IMG} fadeDuration={0} style={{ width: SHOT_HOMING_LEN, height: SHOT_HOMING_THICK }} />
-          <Image source={SHOT_BOMB_IMG} fadeDuration={0} style={{ width: SHOT_BOMB_W, height: SHOT_BOMB_H }} />
-          <Image source={SHOT_LASER_IMG} fadeDuration={0} style={{ width: SHOT_LASER_LEN, height: SHOT_LASER_THICK }} />
-          {ENEMY_SHOTS.map((src, i) => (
-            <Image
-              key={i}
-              source={src}
-              fadeDuration={0}
-              style={{
-                width: ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE,
-                height: (ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE) / ENEMY_SHOT_ASPECT[i],
-              }}
-            />
-          ))}
-        </View>
+        {/* Hidden pre-warm: warms the native image cache before the first shot. */}
+        <Prewarm avatarShot={avatarShot} />
         {/* Player shots use the pack's projectile art: missiles for the normal
             and homing guns, the "S" crate for lobbed bombs. Lasers stay a
             drawn beam — no sprite fits a beam. Bullets are keyed by array

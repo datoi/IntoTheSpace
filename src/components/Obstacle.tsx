@@ -127,7 +127,15 @@ function ObstacleView({ ob, avatarShot }: { ob: Card; avatarShot?: ShotArt }) {
           ))}
         </View>
       ) : gunImg ? (
-        <Image source={gunImg} style={styles.giftIcon} resizeMode="contain" fadeDuration={0} />
+        // The bomb's blast-cloud art streaks sideways in the source; rotate the
+        // falling pickup so it points up like it fires. Laser/homing sprites
+        // already read fine at their native angle.
+        <Image
+          source={gunImg}
+          style={[styles.giftIcon, ob.gun === 'bomb' && { transform: [{ rotate: '-90deg' }] }]}
+          resizeMode="contain"
+          fadeDuration={0}
+        />
       ) : (
         <Text style={styles.emoji}>{ob.emoji}</Text>
       )}

@@ -81,7 +81,10 @@ const hpBand = (t: number): string => {
   return `rgb(${c(0)},${c(1)},${c(2)})`;
 };
 
-export function HealthBar({ hearts }: { hearts: number }) {
+// Memoized: the parent (GameScreen) re-renders every frame, but health changes
+// only on a hit or a ❤️ pickup — so this (and its 16-band gradient fill) should
+// reconcile only when `hearts` actually changes, not 60×/sec.
+export const HealthBar = React.memo(function HealthBar({ hearts }: { hearts: number }) {
   const frac = Math.max(0, Math.min(1, hearts / HEARTS_MAX));
   return (
     <View style={styles.hpWrap} pointerEvents="none">
@@ -97,7 +100,7 @@ export function HealthBar({ hearts }: { hearts: number }) {
       <Text style={styles.hpHeart}>❤️</Text>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   floatText: {

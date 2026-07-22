@@ -3,7 +3,9 @@ import { loadSave, writeSave, loadRun, saveRun, clearRun, DEFAULT_SAVE, SaveData
 import { GameState } from '../types';
 
 const SAVE_KEY = 'doomscroll:save:v1';
-const RUN_KEY = 'doomscroll:run:v3';
+// Must match storage.ts — if the versioned key there moves again, the
+// corrupt-JSON and clearRun tests below silently stop testing anything.
+const RUN_KEY = 'doomscroll:run:v4';
 
 const sampleSave: SaveData = {
   best: 1234,

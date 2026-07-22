@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, Image, StyleSheet, Pressable, ScrollView } from 'react-native';
-import { PALETTE, AVATARS, BACKGROUNDS, COIN_GOLD } from '../game/constants';
+import { PALETTE, AVATARS, BACKGROUNDS, COIN_GOLD, GUN_PICKUP_IMG } from '../game/constants';
 import { SaveData } from '../game/storage';
 import { RunResult } from '../game/types';
+import { ShotArt } from '../game/constants';
 import CoinIcon from '../components/Coin';
 
 // Shop catalogs are shown cheapest-first, so the price climbs as the player
@@ -19,6 +20,7 @@ interface MenuProps {
 
 export function MenuScreen({ save, onStart, onShop }: MenuProps) {
   const avatar = AVATARS.find((a) => a.id === save.selectedAvatar) ?? AVATARS[0];
+  const [showGuide, setShowGuide] = useState(false);
   return (
     <View style={styles.screen}>
       <Text style={styles.kicker}>HOW HIGH CAN YOU FLY</Text>
@@ -42,6 +44,9 @@ export function MenuScreen({ save, onStart, onShop }: MenuProps) {
       <Pressable onPress={onShop} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}>
         <Text style={styles.secondaryTxt}>SHOP</Text>
       </Pressable>
+      <Pressable onPress={() => setShowGuide(true)} hitSlop={10} style={styles.guideLink}>
+        <Text style={styles.guideLinkTxt}>❔ WHAT DO THE PICK-UPS DO?</Text>
+      </Pressable>
 
       <Text style={styles.hint}>
         Drag your ship — it fires on its own.{'\n'}
@@ -49,6 +54,86 @@ export function MenuScreen({ save, onStart, onShop }: MenuProps) {
         scoop up gold coins and gun upgrades.{'\n'}
         How high can you fly?
       </Text>
+
+      {showGuide && <PickupGuide avatarShot={avatar.shot} onClose={() => setShowGuide(false)} />}
+    </View>
+  );
+}
+
+// ---------- Pick-up guide ----------
+// A legend the player can open from the menu, so they know what each falling
+// pick-up grants before they ever grab one in the heat of a run.
+interface GuideRow {
+  icon: React.ReactNode;
+  name: string;
+  desc: string;
+}
+
+function PickupGuide({ avatarShot, onClose }: { avatarShot: ShotArt; onClose: () => void }) {
+  const gunBox = (src: number, rotate?: boolean) => (
+    <Image
+      source={src}
+      resizeMode="contain"
+      style={[styles.guideIconImg, rotate && { transform: [{ rotate: '-90deg' }] }]}
+    />
+  );
+  const rows: GuideRow[] = [
+    {
+      icon: gunBox(avatarShot.src, true),
+      name: '🔫 Double Fire',
+      desc: 'Fires two bolts at once. Grab the same drop again to stack up to ×4.',
+    },
+    {
+      icon: gunBox(GUN_PICKUP_IMG.bomb!, true),
+      name: '💣 Bombs',
+      desc: 'Heavy lobbed blasts that explode on impact, damaging every enemy nearby.',
+    },
+    {
+      icon: gunBox(GUN_PICKUP_IMG.laser!),
+      name: '🔴 Laser',
+      desc: 'A piercing beam that shoots straight through everything in its path.',
+    },
+    {
+      icon: gunBox(GUN_PICKUP_IMG.homing!),
+      name: '🚀 Homing',
+      desc: 'Auto-locking rockets that chase enemies down — they never miss.',
+    },
+    {
+      icon: <Text style={styles.guideIconEmoji}>❤️</Text>,
+      name: 'Heart',
+      desc: 'Restores one life. You start with 3, and can hold up to 10.',
+    },
+    {
+      icon: <CoinIcon size={30} />,
+      name: 'Coin',
+      desc: 'Currency — spend it in the shop on new ships and backgrounds.',
+    },
+  ];
+  return (
+    <View style={styles.guideOverlay}>
+      <Text style={styles.guideTitle}>PICK-UPS</Text>
+      <Text style={styles.guideSub}>Grab these as they fall toward you</Text>
+      <ScrollView
+        style={styles.guideList}
+        contentContainerStyle={{ paddingBottom: 8 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {rows.map((r) => (
+          <View key={r.name} style={styles.guideRow}>
+            <View style={styles.guideIcon}>{r.icon}</View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.guideName}>{r.name}</Text>
+              <Text style={styles.guideDesc}>{r.desc}</Text>
+            </View>
+          </View>
+        ))}
+        <Text style={styles.guideFoot}>
+          Gun pick-ups last a short while, then you drop back to your ship's default shooter.
+        </Text>
+      </ScrollView>
+      <Pressable onPress={onClose} style={({ pressed }) => [styles.primary, pressed && styles.pressed]}>
+        <Text style={styles.primaryTxt}>GOT IT</Text>
+      </Pressable>
     </View>
   );
 }
@@ -282,6 +367,93 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   pressed: { opacity: 0.75 },
+  guideLink: {
+    marginTop: 16,
+  },
+  guideLinkTxt: {
+    color: PALETTE.bell,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+  },
+  // --- Pick-up guide overlay ---
+  guideOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(6,8,16,0.94)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 26,
+    paddingVertical: 60,
+  },
+  guideTitle: {
+    color: PALETTE.text,
+    fontSize: 30,
+    fontWeight: '900',
+    letterSpacing: 4,
+  },
+  guideSub: {
+    color: PALETTE.textDim,
+    fontSize: 12.5,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginTop: 4,
+    marginBottom: 18,
+  },
+  guideList: {
+    alignSelf: 'stretch',
+    flexGrow: 0,
+    flexShrink: 1,
+    marginBottom: 18,
+  },
+  guideRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: PALETTE.card,
+    borderWidth: 1.5,
+    borderColor: PALETTE.cardBorder,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 10,
+    gap: 14,
+  },
+  guideIcon: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guideIconImg: {
+    width: 40,
+    height: 40,
+  },
+  guideIconEmoji: {
+    fontSize: 30,
+  },
+  guideName: {
+    color: PALETTE.text,
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  guideDesc: {
+    color: PALETTE.textDim,
+    fontSize: 12.5,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  guideFoot: {
+    color: PALETTE.textDim,
+    fontSize: 12,
+    fontStyle: 'italic',
+    lineHeight: 17,
+    textAlign: 'center',
+    marginTop: 4,
+    paddingHorizontal: 6,
+  },
   hint: {
     position: 'absolute',
     bottom: 48,

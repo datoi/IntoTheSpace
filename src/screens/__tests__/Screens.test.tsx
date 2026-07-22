@@ -203,3 +203,31 @@ describe('ShopScreen', () => {
     expect(onBuyBackground).not.toHaveBeenCalled();
   });
 });
+
+describe('PickupGuide (menu overlay)', () => {
+  const openGuide = async () => {
+    await render(<MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} />);
+    await fireEvent.press(screen.getByText('❔ WHAT DO THE PICK-UPS DO?'));
+  };
+
+  it('opens from the menu link and lists every pick-up', async () => {
+    await openGuide();
+    expect(screen.getByText('PICK-UPS')).toBeTruthy();
+    for (const name of ['🔫 Double Fire', '💣 Bombs', '🔴 Laser', '🚀 Homing', 'Heart', 'Coin']) {
+      expect(screen.getByText(name)).toBeTruthy();
+    }
+    expect(screen.getByText(/Gun pick-ups last a short while/)).toBeTruthy();
+  });
+
+  it('is hidden until requested', async () => {
+    await render(<MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} />);
+    expect(screen.queryByText('PICK-UPS')).toBeNull();
+  });
+
+  it('GOT IT closes the overlay and returns to the menu', async () => {
+    await openGuide();
+    await fireEvent.press(screen.getByText('GOT IT'));
+    expect(screen.queryByText('PICK-UPS')).toBeNull();
+    expect(screen.getByText('LIFT OFF 🚀')).toBeTruthy();
+  });
+});

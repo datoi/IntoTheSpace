@@ -34,6 +34,11 @@ export const RAMP_SECONDS = 90;
 export const BASE_ROW_INTERVAL = 1.0; // seconds between spawn rows
 export const MIN_ROW_INTERVAL = 0.5;
 
+// --- Pickups (hearts / coins / gun drops) drift down slower than the world
+// falls, so they linger long enough to line up and grab. Fraction of the
+// current world speed. ---
+export const PICKUP_FALL_SCALE = 0.55;
+
 // --- Hearts (your health): every hit costs one, ❤️ pickups restore one ---
 export const HEARTS_START = 3;
 export const HEARTS_MAX = 10;
@@ -351,8 +356,8 @@ export const GUN_PICKUP_EMOJI: Record<GunKind, string> = {
   laser: '🔴',
   homing: '🚀',
 };
-export const GIFT_ICON = 36; // rendered size of a gun-drop sprite
-export const GIFT_SHOT_LEN = 30; // length of each shot in the doubled 'double' pickup icon
+export const GIFT_ICON = 48; // rendered size of a gun-drop sprite (large so you can read the gun before grabbing)
+export const GIFT_SHOT_LEN = 40; // length of each shot in the doubled 'double' pickup icon
 
 // --- Coins: the only currency. Collected in flight, spent on ships. ---
 export const COIN_EVERY = 6; // s between coin drops
