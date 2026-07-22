@@ -7,21 +7,23 @@ import {
   BOSS_GIANT_IMG,
   BOSS_MINI_VIS,
   BOSS_GIANT_VIS,
-  SHOT_NORMAL_IMG,
   SHOT_HOMING_IMG,
   SHOT_BOMB_IMG,
-  LASERSHOTS,
-  LASERSHOT_ASPECT,
+  SHOT_LASER_IMG,
+  ENEMY_SHOTS,
+  ENEMY_SHOT_ASPECT,
+  PLAYER_SHOT_LEN,
   ENEMY_BULLET_SIZE,
   ENEMY_BULLET_ART_SCALE,
   ENEMY_SHIP_VIS,
   AVATAR_IMG_W,
   AVATAR_IMG_H,
-  SHOT_NORMAL_W,
-  SHOT_NORMAL_H,
-  SHOT_HOMING_W,
-  SHOT_HOMING_H,
-  SHOT_BOMB_SIZE,
+  SHOT_HOMING_LEN,
+  SHOT_HOMING_THICK,
+  SHOT_BOMB_W,
+  SHOT_BOMB_H,
+  SHOT_LASER_LEN,
+  SHOT_LASER_THICK,
   PRELOAD_TIMEOUT_MS,
   PRELOAD_BATCH,
 } from './constants';
@@ -35,10 +37,10 @@ export interface PreloadSprite {
 // Sprites mounted hidden at their true in-game size during boot, so the native
 // image cache holds a decoded bitmap of the right dimensions before the game
 // loop — which starts dealing damage on its first frame — can spawn anything.
-// Backgrounds are deliberately NOT in this list: mounting all 21 of them
-// full-screen would hold ~75MB of bitmaps and risk an OOM on low-end devices.
-// They get file-level caching below plus GameScreen's own crossfade preload,
-// which has BG_FADE_S (25s) of lead time before a set is ever visible.
+// Backgrounds are deliberately NOT in this list: mounting every set's layers
+// full-screen would hold tens of MB of bitmaps and risk an OOM on low-end
+// devices. A run shows only one set (the player's pick), and it gets file-level
+// caching below — its layers decode on GameScreen mount, before the climb.
 export const PRELOAD_SPRITES: PreloadSprite[] = [
   ...AVATARS.map((a) => a.image).filter((src): src is number => src != null).map((src) => ({
     src,
@@ -48,12 +50,14 @@ export const PRELOAD_SPRITES: PreloadSprite[] = [
   ...ENEMY_SHIPS.map((src) => ({ src, w: ENEMY_SHIP_VIS, h: ENEMY_SHIP_VIS })),
   { src: BOSS_MINI_IMG, w: BOSS_MINI_VIS, h: BOSS_MINI_VIS },
   { src: BOSS_GIANT_IMG, w: BOSS_GIANT_VIS, h: BOSS_GIANT_VIS },
-  { src: SHOT_NORMAL_IMG, w: SHOT_NORMAL_W, h: SHOT_NORMAL_H },
-  { src: SHOT_HOMING_IMG, w: SHOT_HOMING_W, h: SHOT_HOMING_H },
-  { src: SHOT_BOMB_IMG, w: SHOT_BOMB_SIZE, h: SHOT_BOMB_SIZE },
-  ...LASERSHOTS.map((src, i) => {
+  { src: SHOT_HOMING_IMG, w: SHOT_HOMING_LEN, h: SHOT_HOMING_THICK },
+  { src: SHOT_BOMB_IMG, w: SHOT_BOMB_W, h: SHOT_BOMB_H },
+  { src: SHOT_LASER_IMG, w: SHOT_LASER_LEN, h: SHOT_LASER_THICK },
+  // Every avatar's fire shot — any of them can be equipped, so warm them all.
+  ...AVATARS.map((a) => ({ src: a.shot.src, w: PLAYER_SHOT_LEN, h: PLAYER_SHOT_LEN / a.shot.aspect })),
+  ...ENEMY_SHOTS.map((src, i) => {
     const w = ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE;
-    return { src, w, h: w / LASERSHOT_ASPECT[i] };
+    return { src, w, h: w / ENEMY_SHOT_ASPECT[i] };
   }),
 ];
 

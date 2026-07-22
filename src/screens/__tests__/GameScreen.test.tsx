@@ -7,6 +7,7 @@ import {
   AVATAR_Y,
   AVATAR_SIZE,
   HEARTS_START,
+  HEARTS_MAX,
   ENEMY_SHIPS,
   BOSS_MINI_IMG,
   BOSS_GIANT_IMG,
@@ -19,6 +20,8 @@ import {
   BOSS_MINI_COINS,
   BOSS_GIANT_COINS,
   FEED_PAD,
+  BACKGROUNDS,
+  AVATARS,
 } from '../../game/constants';
 
 /**
@@ -42,9 +45,6 @@ const quietState = (over: Partial<GameState> = {}): GameState => ({
   dragging: false,
   alt: 0,
   wave: 1,
-  bgIdx: 0,
-  bgFade: 0,
-  bgTier: 0,
   waveClearTimer: 999,
   gun: 'single',
   gunTime: 0,
@@ -96,6 +96,8 @@ const renderGame = async (resume?: GameState, extraProps: Record<string, unknown
     <GameScreen
       best={0}
       avatarEmoji="🚀"
+      avatarShot={AVATARS[0].shot}
+      background={BACKGROUNDS[0].set}
       resume={resume ?? null}
       onGameOver={onGameOver}
       onPersist={onPersist}
@@ -142,6 +144,20 @@ const countImages = (source: unknown): number => {
   return count;
 };
 
+// Health now shows as a vertical bar: the fill is the only node with a
+// percentage height. Convert that fraction back to a heart count.
+const heartsFromBar = (): number => {
+  let pct = 0;
+  const walk = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+    const style = Object.assign({}, ...[node.props?.style].flat(Infinity).filter(Boolean));
+    if (typeof style.height === 'string' && style.height.endsWith('%')) pct = parseFloat(style.height);
+    (node.children ?? []).forEach(walk);
+  };
+  walk(screen.toJSON());
+  return Math.round((pct / 100) * HEARTS_MAX);
+};
+
 beforeEach(() => {
   jest.useFakeTimers();
 });
@@ -154,7 +170,7 @@ describe('GameScreen — rendering & HUD', () => {
   it('starts a fresh run with 0 score and full hearts', async () => {
     await renderGame();
     expect(screen.getByText('0')).toBeTruthy();
-    expect(screen.getByText(`❤️ ${HEARTS_START}`)).toBeTruthy();
+    expect(heartsFromBar()).toBe(HEARTS_START);
     expect(screen.getByText('❚❚')).toBeTruthy(); // pause button
   });
 
@@ -200,7 +216,7 @@ describe('GameScreen — collisions & pickups', () => {
     });
     await renderGame(resume);
     await advance(100);
-    expect(screen.getByText(`❤️ ${HEARTS_START + 1}`)).toBeTruthy();
+    expect(heartsFromBar()).toBe(HEARTS_START + 1);
     expect(screen.getByText('+1 ❤️')).toBeTruthy();
   });
 
@@ -235,7 +251,7 @@ describe('GameScreen — collisions & pickups', () => {
     });
     await renderGame(resume);
     await advance(100);
-    expect(screen.getByText('❤️ 10')).toBeTruthy();
+    expect(heartsFromBar()).toBe(10);
   });
 
   it('colliding with an enemy costs a heart', async () => {
@@ -244,7 +260,7 @@ describe('GameScreen — collisions & pickups', () => {
     });
     await renderGame(resume);
     await advance(100);
-    expect(screen.getByText(`❤️ ${HEARTS_START - 1}`)).toBeTruthy();
+    expect(heartsFromBar()).toBe(HEARTS_START - 1);
     expect(screen.getByText('-1 💔')).toBeTruthy();
   });
 
@@ -265,10 +281,10 @@ describe('GameScreen — collisions & pickups', () => {
     const resume = quietState({ enemyBullets: [bullet] });
     await renderGame(resume);
     await advance(100);
-    expect(screen.getByText(`❤️ ${HEARTS_START - 1}`)).toBeTruthy();
+    expect(heartsFromBar()).toBe(HEARTS_START - 1);
     // Consumed: only one heart lost even after more frames.
     await advance(300);
-    expect(screen.getByText(`❤️ ${HEARTS_START - 1}`)).toBeTruthy();
+    expect(heartsFromBar()).toBe(HEARTS_START - 1);
   });
 
   it('enemies shoot back and their aimed shot eventually hits a static player', async () => {
@@ -278,7 +294,7 @@ describe('GameScreen — collisions & pickups', () => {
     });
     await renderGame(resume);
     await advance(5000); // straight shot at 210px/s covers ~760px in ~3.6s
-    expect(screen.queryByText(`❤️ ${HEARTS_START}`)).toBeNull();
+    expect(heartsFromBar()).toBeLessThan(HEARTS_START);
   });
 });
 
@@ -291,7 +307,7 @@ describe('GameScreen — escalating enemy behavior', () => {
     });
     await renderGame(resume);
     await advance(4200); // 165px/s homing shot covers ~590px well inside its 4.5s life
-    expect(screen.queryByText(`❤️ ${HEARTS_START}`)).toBeNull();
+    expect(heartsFromBar()).toBeLessThan(HEARTS_START);
   });
 
   it('wave 20+: a wounded formation enemy charges the player and connects', async () => {
@@ -301,7 +317,7 @@ describe('GameScreen — escalating enemy behavior', () => {
     });
     await renderGame(resume);
     await advance(7200); // charge speed 120px/s over ~780px
-    expect(screen.getByText(`❤️ ${HEARTS_START - 1}`)).toBeTruthy();
+    expect(heartsFromBar()).toBe(HEARTS_START - 1);
     expect(screen.getByText('-1 💔')).toBeTruthy();
   });
 
@@ -403,9 +419,9 @@ describe('GameScreen — escalating enemy behavior', () => {
     const resume = quietState({ cards: [boss], enemyFireTimer: 0.01 });
     await renderGame(resume);
     await advance(200); // one fire event: 1 volley shot + 2 fan shots
-    // Enemy shots draw the tier-0 laser sprite; the hidden prewarm strip mounts one more.
-    const { LASERSHOTS } = require('../../game/constants');
-    expect(countImages(LASERSHOTS[0])).toBe(4);
+    // Enemy shots draw the tier-0 orb sprite; the hidden prewarm strip mounts one more.
+    const { ENEMY_SHOTS } = require('../../game/constants');
+    expect(countImages(ENEMY_SHOTS[0])).toBe(4);
   });
 });
 

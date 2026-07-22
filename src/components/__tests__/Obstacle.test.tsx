@@ -9,7 +9,7 @@ import {
   laneX,
   OB_VIS,
   GUN_PICKUP_IMG,
-  GUN_PICKUP_EMOJI,
+  AVATARS,
   COIN_GOLD,
 } from '../../game/constants';
 
@@ -142,11 +142,28 @@ describe('ObstacleView — pickups and death animation', () => {
     expect(images[0].props.source).toBe(GUN_PICKUP_IMG.homing);
   });
 
-  it('falls back to the emoji for the laser, which has no projectile sprite', async () => {
-    const emoji = GUN_PICKUP_EMOJI.laser;
-    await render(<ObstacleView ob={{ ...baseCard, kind: 'gift', gun: 'laser', emoji }} />);
+  it("shows the laser drop wearing its beam art", async () => {
+    await render(<ObstacleView ob={{ ...baseCard, kind: 'gift', gun: 'laser', emoji: '🔴' }} />);
+    const images = findImages();
+    expect(images).toHaveLength(1);
+    expect(images[0].props.source).toBe(GUN_PICKUP_IMG.laser);
+  });
+
+  it("shows a double drop as two of the avatar's own shots", async () => {
+    const shot = AVATARS[0].shot;
+    await render(
+      <ObstacleView ob={{ ...baseCard, kind: 'gift', gun: 'double', emoji: '🔫' }} avatarShot={shot} />
+    );
+    const images = findImages();
+    expect(images).toHaveLength(2);
+    expect(images[0].props.source).toBe(shot.src);
+    expect(images[1].props.source).toBe(shot.src);
+  });
+
+  it('falls back to the emoji for a double drop when no avatar shot is given', async () => {
+    await render(<ObstacleView ob={{ ...baseCard, kind: 'gift', gun: 'double', emoji: '🔫' }} />);
     expect(findImages()).toHaveLength(0);
-    expect(screen.getByText(emoji)).toBeTruthy();
+    expect(screen.getByText('🔫')).toBeTruthy();
   });
 
   it('falls back to the emoji when a drop carries no gun (old snapshots)', async () => {

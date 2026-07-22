@@ -36,6 +36,7 @@ export interface Bullet {
   phase?: number; // zigzag offset for homing rockets
   targetId?: number; // enemy a homing rocket is locked onto
   hits?: number[]; // enemies a piercing laser has already damaged
+  angle?: number; // rocket heading (deg) so its sprite faces where it flies
 }
 
 // A shot fired by an enemy back down at the player (Galaxy-Attack style).
@@ -85,9 +86,6 @@ export interface GameState {
   dragging: boolean;
   alt: number; // meters climbed
   wave: number; // current wave number (enemies come in cleared-then-harder waves)
-  bgIdx: number; // current background set (index into BG_SETS)
-  bgFade: number; // 0 = idle; (0,1) = crossfade progress toward the next set
-  bgTier: number; // last 5-wave tier that triggered a background change
   waveClearTimer: number; // delay before the next wave drops in
   gun: GunKind;
   gunTime: number; // seconds left on a gift gun

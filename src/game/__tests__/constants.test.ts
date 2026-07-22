@@ -7,9 +7,9 @@ import {
   shipForWave,
   SHIP_WAVES,
   ENEMY_SHIPS,
-  laserShotForShip,
-  LASERSHOTS,
-  LASERSHOT_ASPECT,
+  enemyShotForShip,
+  ENEMY_SHOTS,
+  ENEMY_SHOT_ASPECT,
   BOSS_MINI_HP,
   BOSS_GIANT_HP,
   BG_SETS,
@@ -80,27 +80,27 @@ describe('shipForWave', () => {
   });
 });
 
-describe('laserShotForShip', () => {
+describe('enemyShotForShip', () => {
   it('maps each ship tier to a shot sprite index in range', () => {
     for (let s = 0; s < ENEMY_SHIPS.length; s++) {
-      const idx = laserShotForShip(s);
+      const idx = enemyShotForShip(s);
       expect(idx).toBeGreaterThanOrEqual(0);
-      expect(idx).toBeLessThan(LASERSHOTS.length);
+      expect(idx).toBeLessThan(ENEMY_SHOTS.length);
     }
   });
 
   it('cycles: the 6th ship tier reuses the first shot sprite', () => {
-    expect(laserShotForShip(LASERSHOTS.length)).toBe(0);
+    expect(enemyShotForShip(ENEMY_SHOTS.length)).toBe(0);
   });
 
   it('handles negative ship indices without going out of range', () => {
-    expect(laserShotForShip(-1)).toBeGreaterThanOrEqual(0);
-    expect(laserShotForShip(-1)).toBeLessThan(LASERSHOTS.length);
+    expect(enemyShotForShip(-1)).toBeGreaterThanOrEqual(0);
+    expect(enemyShotForShip(-1)).toBeLessThan(ENEMY_SHOTS.length);
   });
 
   it('has one aspect ratio per shot sprite', () => {
-    expect(LASERSHOT_ASPECT).toHaveLength(LASERSHOTS.length);
-    for (const a of LASERSHOT_ASPECT) {
+    expect(ENEMY_SHOT_ASPECT).toHaveLength(ENEMY_SHOTS.length);
+    for (const a of ENEMY_SHOT_ASPECT) {
       expect(a).toBeGreaterThan(0);
     }
   });

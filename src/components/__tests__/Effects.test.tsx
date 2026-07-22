@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react-native';
-import { ParticleView, FloatTextView, HUD } from '../Effects';
+import { ParticleView, FloatTextView, HUD, HealthBar } from '../Effects';
 import { Particle, FloatText } from '../../game/types';
 import { GUN_LABEL, HEARTS_MAX } from '../../game/constants';
 
@@ -46,7 +46,6 @@ describe('FloatTextView', () => {
 
 describe('HUD', () => {
   const base = {
-    hearts: 3,
     coins: 7,
     alt: 1234.6,
     gun: 'single' as const,
@@ -54,29 +53,15 @@ describe('HUD', () => {
     gunLevel: 1,
   };
 
-  it('headlines the distance and shows coins and the heart count', async () => {
+  it('headlines the distance and shows coins', async () => {
     await render(<HUD {...base} />);
     expect(screen.getByText('🚀 1235m')).toBeTruthy();
     expect(screen.getByText('7')).toBeTruthy();
-    expect(screen.getByText('❤️ 3')).toBeTruthy();
-  });
-
-  it('keeps the heart count on one line at HEARTS_MAX', async () => {
-    await render(<HUD {...base} hearts={HEARTS_MAX} />);
-    expect(screen.getByText(`❤️ ${HEARTS_MAX}`)).toBeTruthy();
   });
 
   it('never shows negative altitude', async () => {
     await render(<HUD {...base} alt={-5} />);
     expect(screen.getByText('🚀 0m')).toBeTruthy();
-  });
-
-  it('clamps the heart count to 0 rather than showing a negative', async () => {
-    for (const hearts of [0, -1]) {
-      await render(<HUD {...base} hearts={hearts} />);
-      expect(screen.getByText('❤️ 0')).toBeTruthy();
-      await screen.unmount();
-    }
   });
 
   it('hides the gun banner for the default single shooter', async () => {
@@ -97,5 +82,35 @@ describe('HUD', () => {
   it('never shows negative gun time', async () => {
     await render(<HUD {...base} gun="double" gunTime={-0.4} />);
     expect(screen.getByText(`${GUN_LABEL.double} · 0s`)).toBeTruthy();
+  });
+});
+
+describe('HealthBar', () => {
+  // The fill is the only node with a percentage height.
+  const fillPct = (): string | undefined => {
+    let pct: string | undefined;
+    const walk = (node: any) => {
+      if (!node || typeof node !== 'object') return;
+      const style = flatten(node.props?.style ?? {});
+      if (typeof style.height === 'string' && style.height.endsWith('%')) pct = style.height;
+      (node.children ?? []).forEach(walk);
+    };
+    walk(screen.toJSON());
+    return pct;
+  };
+
+  it('fills in proportion to current hearts', async () => {
+    await render(<HealthBar hearts={HEARTS_MAX / 2} />);
+    expect(fillPct()).toBe('50%');
+  });
+
+  it('is full at HEARTS_MAX', async () => {
+    await render(<HealthBar hearts={HEARTS_MAX} />);
+    expect(fillPct()).toBe('100%');
+  });
+
+  it('empties (and never goes negative) at zero or below', async () => {
+    await render(<HealthBar hearts={-3} />);
+    expect(fillPct()).toBe('0%');
   });
 });

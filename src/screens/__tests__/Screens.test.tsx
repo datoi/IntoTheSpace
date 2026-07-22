@@ -10,6 +10,8 @@ const freshSave: SaveData = {
   likes: 0,
   unlocked: ['ironclad'],
   selectedAvatar: 'ironclad',
+  unlockedBackgrounds: ['violet'],
+  selectedBackground: 'violet',
 };
 
 describe('MenuScreen', () => {
@@ -33,7 +35,7 @@ describe('MenuScreen', () => {
     await render(<MenuScreen save={freshSave} onStart={onStart} onShop={onShop} />);
     await fireEvent.press(screen.getByText('LIFT OFF 🚀'));
     expect(onStart).toHaveBeenCalledTimes(1);
-    await fireEvent.press(screen.getByText('AVATARS'));
+    await fireEvent.press(screen.getByText('SHOP'));
     expect(onShop).toHaveBeenCalledTimes(1);
   });
 
@@ -107,14 +109,27 @@ describe('ShopScreen', () => {
     likes: 200,
     unlocked: ['ironclad', 'specter'],
     selectedAvatar: 'specter',
+    unlockedBackgrounds: ['violet'],
+    selectedBackground: 'violet',
   };
 
   const renderShop = async (save: SaveData) => {
     const onBuy = jest.fn();
     const onSelect = jest.fn();
+    const onBuyBackground = jest.fn();
+    const onSelectBackground = jest.fn();
     const onBack = jest.fn();
-    await render(<ShopScreen save={save} onBuy={onBuy} onSelect={onSelect} onBack={onBack} />);
-    return { onBuy, onSelect, onBack };
+    await render(
+      <ShopScreen
+        save={save}
+        onBuyAvatar={onBuy}
+        onSelectAvatar={onSelect}
+        onBuyBackground={onBuyBackground}
+        onSelectBackground={onSelectBackground}
+        onBack={onBack}
+      />
+    );
+    return { onBuy, onSelect, onBuyBackground, onSelectBackground, onBack };
   };
 
   it('lists every avatar with its state (equipped / owned / price)', async () => {
@@ -162,5 +177,29 @@ describe('ShopScreen', () => {
     const { onBack } = await renderShop(richSave);
     await fireEvent.press(screen.getByText('BACK'));
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('switches to the backgrounds tab and buys an affordable one', async () => {
+    const { onBuyBackground, onSelectBackground } = await renderShop(richSave); // 200 coins
+    await fireEvent.press(screen.getByText('BACKGROUNDS'));
+    expect(screen.getByText('Deep Void')).toBeTruthy(); // 90 coins, affordable
+    await fireEvent.press(screen.getByText('Deep Void'));
+    expect(onBuyBackground).toHaveBeenCalledWith('void');
+    expect(onSelectBackground).not.toHaveBeenCalled();
+  });
+
+  it('equips an owned background instead of re-buying it', async () => {
+    const { onBuyBackground, onSelectBackground } = await renderShop(richSave);
+    await fireEvent.press(screen.getByText('BACKGROUNDS'));
+    await fireEvent.press(screen.getByText('Violet Veil')); // owned (free starter)
+    expect(onSelectBackground).toHaveBeenCalledWith('violet');
+    expect(onBuyBackground).not.toHaveBeenCalled();
+  });
+
+  it('locks a background the wallet cannot afford', async () => {
+    const { onBuyBackground } = await renderShop(richSave); // 200 coins
+    await fireEvent.press(screen.getByText('BACKGROUNDS'));
+    await fireEvent.press(screen.getByText('Crimson Cloud')); // 450 coins
+    expect(onBuyBackground).not.toHaveBeenCalled();
   });
 });

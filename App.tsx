@@ -8,7 +8,7 @@ import { loadSave, writeSave, loadRun, saveRun, clearRun, SaveData, DEFAULT_SAVE
 import { preloadAssets } from './src/game/preload';
 import { initSounds } from './src/game/sounds';
 import { GamePhase, GameState, RunResult } from './src/game/types';
-import { PALETTE, AVATARS, DECODE_GRACE_MS, MIN_LOADING_MS } from './src/game/constants';
+import { PALETTE, AVATARS, BACKGROUNDS, DECODE_GRACE_MS, MIN_LOADING_MS } from './src/game/constants';
 
 export default function App() {
   const [phase, setPhase] = useState<GamePhase>('menu');
@@ -116,9 +116,32 @@ export default function App() {
     [save, persist]
   );
 
+  const buyBackground = useCallback(
+    (id: string) => {
+      const def = BACKGROUNDS.find((b) => b.id === id);
+      if (!def || save.unlockedBackgrounds.includes(id) || save.likes < def.price) return;
+      persist({
+        ...save,
+        likes: save.likes - def.price,
+        unlockedBackgrounds: [...save.unlockedBackgrounds, id],
+        selectedBackground: id,
+      });
+    },
+    [save, persist]
+  );
+
+  const selectBackground = useCallback(
+    (id: string) => {
+      if (!save.unlockedBackgrounds.includes(id)) return;
+      persist({ ...save, selectedBackground: id });
+    },
+    [save, persist]
+  );
+
   const selectedAvatar = AVATARS.find((a) => a.id === save.selectedAvatar) ?? AVATARS[0];
   const avatarEmoji = selectedAvatar.emoji;
   const avatarImage = selectedAvatar.image;
+  const selectedBackground = BACKGROUNDS.find((b) => b.id === save.selectedBackground) ?? BACKGROUNDS[0];
 
   if (!booted) {
     return (
@@ -141,6 +164,8 @@ export default function App() {
           best={save.best}
           avatarEmoji={avatarEmoji}
           avatarImage={avatarImage}
+          avatarShot={selectedAvatar.shot}
+          background={selectedBackground.set}
           resume={pausedRun}
           startPaused={!!pausedRun}
           onGameOver={handleGameOver}
@@ -159,7 +184,14 @@ export default function App() {
         />
       )}
       {phase === 'shop' && (
-        <ShopScreen save={save} onBuy={buyAvatar} onSelect={selectAvatar} onBack={() => setPhase('menu')} />
+        <ShopScreen
+          save={save}
+          onBuyAvatar={buyAvatar}
+          onSelectAvatar={selectAvatar}
+          onBuyBackground={buyBackground}
+          onSelectBackground={selectBackground}
+          onBack={() => setPhase('menu')}
+        />
       )}
     </View>
   );

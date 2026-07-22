@@ -34,9 +34,6 @@ const doomedRun = (): GameState => ({
   dragging: false,
   alt: 4321.4,
   wave: 2,
-  bgIdx: 0,
-  bgFade: 0,
-  bgTier: 0,
   waveClearTimer: 999,
   gun: 'single',
   gunTime: 0,
@@ -120,7 +117,7 @@ describe('App — menu & navigation', () => {
 
   it('navigates menu → shop → menu', async () => {
     await bootApp();
-    await fireEvent.press(screen.getByText('AVATARS'));
+    await fireEvent.press(screen.getByText('SHOP'));
     expect(screen.getByText(/coins/)).toBeTruthy();
     await fireEvent.press(screen.getByText('BACK'));
     expect(screen.getByText('LIFT OFF 🚀')).toBeTruthy();
@@ -144,7 +141,7 @@ describe('App — shop economy', () => {
 
   it('buying an avatar deducts coins, unlocks, equips, and persists', async () => {
     await bootApp();
-    await fireEvent.press(screen.getByText('AVATARS'));
+    await fireEvent.press(screen.getByText('SHOP'));
     await fireEvent.press(screen.getByText('Specter')); // costs 60
     expect(screen.getByText('140 coins')).toBeTruthy();
     expect(screen.getByText('EQUIPPED')).toBeTruthy();
@@ -157,7 +154,7 @@ describe('App — shop economy', () => {
 
   it('cannot buy what it cannot afford', async () => {
     await bootApp();
-    await fireEvent.press(screen.getByText('AVATARS'));
+    await fireEvent.press(screen.getByText('SHOP'));
     await fireEvent.press(screen.getByText('Valkyrie')); // costs 500 > 200
     expect(screen.getByText('200 coins')).toBeTruthy(); // unchanged
     const stored = JSON.parse((await AsyncStorage.getItem(SAVE_KEY))!);
@@ -175,7 +172,7 @@ describe('App — shop economy', () => {
       })
     );
     await bootApp();
-    await fireEvent.press(screen.getByText('AVATARS'));
+    await fireEvent.press(screen.getByText('SHOP'));
     await fireEvent.press(screen.getByText('Specter'));
     expect(screen.getByText('200 coins')).toBeTruthy();
     await advance(10);

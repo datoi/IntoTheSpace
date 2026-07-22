@@ -11,6 +11,8 @@ export interface SaveData {
   likes: number;
   unlocked: string[]; // avatar ids
   selectedAvatar: string;
+  unlockedBackgrounds: string[]; // background ids
+  selectedBackground: string;
 }
 
 export const DEFAULT_SAVE: SaveData = {
@@ -18,11 +20,17 @@ export const DEFAULT_SAVE: SaveData = {
   likes: 0,
   unlocked: ['ironclad'],
   selectedAvatar: 'ironclad',
+  unlockedBackgrounds: ['violet'],
+  selectedBackground: 'violet',
 };
 
-// A spread of DEFAULT_SAVE would alias its `unlocked` array — callers mutating
-// the returned save would corrupt the module-level default.
-const freshDefault = (): SaveData => ({ ...DEFAULT_SAVE, unlocked: [...DEFAULT_SAVE.unlocked] });
+// A spread of DEFAULT_SAVE would alias its array fields — callers mutating the
+// returned save would corrupt the module-level default.
+const freshDefault = (): SaveData => ({
+  ...DEFAULT_SAVE,
+  unlocked: [...DEFAULT_SAVE.unlocked],
+  unlockedBackgrounds: [...DEFAULT_SAVE.unlockedBackgrounds],
+});
 
 export async function loadSave(): Promise<SaveData> {
   try {
@@ -33,6 +41,7 @@ export async function loadSave(): Promise<SaveData> {
       ...freshDefault(),
       ...parsed,
       unlocked: parsed.unlocked?.length ? parsed.unlocked : ['ironclad'],
+      unlockedBackgrounds: parsed.unlockedBackgrounds?.length ? parsed.unlockedBackgrounds : ['violet'],
     };
   } catch {
     return freshDefault();

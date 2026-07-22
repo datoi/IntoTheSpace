@@ -10,6 +10,8 @@ const sampleSave: SaveData = {
   likes: 42,
   unlocked: ['ironclad', 'specter'],
   selectedAvatar: 'specter',
+  unlockedBackgrounds: ['violet', 'void'],
+  selectedBackground: 'void',
 };
 
 // Minimal-but-complete run state; only fields storage cares about are shape-level.
@@ -23,9 +25,6 @@ const sampleRun = {
   dragging: false,
   alt: 999,
   wave: 3,
-  bgIdx: 0,
-  bgFade: 0,
-  bgTier: 0,
   waveClearTimer: 1,
   gun: 'single',
   gunTime: 0,

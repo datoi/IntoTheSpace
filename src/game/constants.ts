@@ -40,7 +40,7 @@ export const HEARTS_MAX = 10;
 export const HEART_EVERY = 16; // s between ❤️ drops
 
 // --- Guns & bullets ---
-export const FIRE_RATE = 0.2; // s between shots (single / double)
+export const FIRE_RATE = 0.32; // s between shots (single / double)
 export const BOMB_FIRE_RATE = 0.6; // bombs hit harder but fire slower
 export const BULLET_SPEED = 720; // px/s upward
 export const BULLET_DMG = 1;
@@ -50,8 +50,6 @@ export const BOMB_SPLASH_RADIUS = 95; // px from the impact point
 export const LASER_FIRE_RATE = 0.5;
 export const LASER_DMG = 4;
 export const LASER_LEN = 60; // beam length px — pierces everything it sweeps
-export const LASER_COLOR = '#FF3B3B'; // beam core
-export const LASER_EDGE = '#FFB3B3'; // hot rim around the core
 export const ROCKET_FIRE_RATE = 0.7; // s between homing rocket launches
 export const ROCKET_DMG = 6;
 export const ROCKET_SPEED = 430; // slower than bullets, but it never misses
@@ -115,10 +113,13 @@ export const BOSS_GIANT_HP = (wave: number) => 50 + wave * 3;
 export const BOSS_SWAY_AMP = 0.3; // fraction of screen width the boss sways from center
 export const BOSS_SWAY_FREQ = 0.7; // rad/s
 
-// --- Player shot art (pack "Pickups & Projectiles" + missiles) ---
-export const SHOT_NORMAL_IMG = require('../../assets/bullets/shot_normal.png'); // missile
-export const SHOT_HOMING_IMG = require('../../assets/bullets/shot_homing.png'); // recolored missile
-export const SHOT_BOMB_IMG = require('../../assets/bullets/shot_bomb.png'); // "S" crate — a lobbed charge
+// --- Gun power-up projectiles (from the laser/bullet FX pack). Each falling
+// pickup wears its gun's own shot art so you can read what it grants before
+// grabbing it. The 'double' pickup instead shows the avatar's own shot doubled
+// (resolved in the render, since it depends on the equipped ship). ---
+export const SHOT_BOMB_IMG = require('../../assets/bullets/gun_bomb.png'); // yellow blast cloud
+export const SHOT_LASER_IMG = require('../../assets/bullets/gun_laser.png'); // red energy beam
+export const SHOT_HOMING_IMG = require('../../assets/bullets/gun_rocket.png'); // green rocket bolt
 
 // --- Sprite render sizes ---
 // Shared by the live render and the boot preloader: an image warmed at a
@@ -127,27 +128,38 @@ export const SHOT_BOMB_IMG = require('../../assets/bullets/shot_bomb.png'); // "
 export const ENEMY_SHIP_VIS = 56;
 export const AVATAR_IMG_W = 56;
 export const AVATAR_IMG_H = 64;
-export const SHOT_NORMAL_W = 22;
-export const SHOT_NORMAL_H = 26;
-export const SHOT_HOMING_W = 26;
-export const SHOT_HOMING_H = 30;
-export const SHOT_BOMB_SIZE = 24;
-export const ENEMY_BULLET_ART_SCALE = 2.4; // sprite width = bullet size × this
+// The power-up shots are drawn the same length as the default bolt
+// (PLAYER_SHOT_LEN = 62), each at its own source aspect.
+// Bomb: a soft blast cloud. The source art streaks horizontally, so the render
+// rotates it 90° to point along travel (up). Source aspect ~1.26.
+export const SHOT_BOMB_W = 72;
+export const SHOT_BOMB_H = 57;
+// Laser: a piercing beam-bolt, laid out along travel then rotated to point up.
+// Drawn longer than the beam's mechanical reach (LASER_LEN); the extra is
+// trailing tail behind the tip, which is what lands the hit. Source aspect ~1.74.
+export const SHOT_LASER_LEN = 62;
+export const SHOT_LASER_THICK = 36;
+// Homing rocket: a bolt rotated to face its heading. Source aspect ~2.31.
+export const SHOT_HOMING_LEN = 44; // along travel
+export const SHOT_HOMING_THICK = 19;
+export const ENEMY_BULLET_ART_SCALE = 3.2; // sprite width = bullet size × this (missiles have canvas padding, so drawn a bit larger)
 
-// --- Enemy bullet art: every ship tier fires its own laser-shot sprite
-// instead of a plain colored dot. There are 6 ship tiers and 5 shots, so the
-// shots cycle (shipIdx % 5) — the 6th tier (waves 26+) reuses the first.
-export const LASERSHOTS = [
-  require('../../assets/bullets/lasershot1.png'), // alien1 (waves 1–5) / alien6 (26+): fire comet
-  require('../../assets/bullets/lasershot2.png'), // alien2, waves 6–10: lightning bolt
-  require('../../assets/bullets/lasershot3.png'), // alien3, waves 11–15: purple energy blade
-  require('../../assets/bullets/lasershot4.png'), // alien4, waves 16–20: orange orb
-  require('../../assets/bullets/lasershot5.png'), // alien5, waves 21–25: cyan starburst
+// --- Enemy bullet art: every ship tier fires its own missile sprite (from the
+// "2D Space Shooter" pack) instead of a plain colored dot. Each is a distinct
+// design/color so the tiers read apart. There are 6 ship tiers and 5 shots, so
+// they cycle (shipIdx % 5): the 6th tier reuses the first. The sprites point UP
+// (nose at top) on a square canvas — the render rotates them to face travel.
+export const ENEMY_SHOTS = [
+  require('../../assets/bullets/eshot1.png'), // alien1 (waves 1–5) / alien6 (26+): green missile
+  require('../../assets/bullets/eshot2.png'), // alien2, waves 6–10: teal missile
+  require('../../assets/bullets/eshot3.png'), // alien3, waves 11–15: red missile
+  require('../../assets/bullets/eshot4.png'), // alien4, waves 16–20: blue missile
+  require('../../assets/bullets/eshot5.png'), // alien5, waves 21–25: pink missile
 ];
-// width/height of each trimmed sprite — used to draw it at the right aspect.
-export const LASERSHOT_ASPECT = [2.222, 2.333, 3.182, 2.059, 1.647];
-export const laserShotForShip = (shipIdx: number) =>
-  LASERSHOTS.length ? ((shipIdx % LASERSHOTS.length) + LASERSHOTS.length) % LASERSHOTS.length : -1;
+// Square canvases (art centered with padding) — drawn at 1:1.
+export const ENEMY_SHOT_ASPECT = [1, 1, 1, 1, 1];
+export const enemyShotForShip = (shipIdx: number) =>
+  ENEMY_SHOTS.length ? ((shipIdx % ENEMY_SHOTS.length) + ENEMY_SHOTS.length) % ENEMY_SHOTS.length : -1;
 
 // --- Parallax space backgrounds. Two source packs, one render model:
 // each set is an optional static base composite plus scrolling layers
@@ -188,6 +200,9 @@ const spbgSet = (base: number, far: number, mid: number, near: number): BgSet =>
 // underneath show through while the stars stay visible).
 const SBS_STARS_MID = require('../../assets/background/sbs_stars_mid.png');
 const SBS_STARS_NEAR = require('../../assets/background/sbs_stars_near.png');
+const SBS_PURPLE = require('../../assets/background/sbs_purple.png');
+const SBS_BLUE = require('../../assets/background/sbs_blue.png');
+const SBS_GREEN = require('../../assets/background/sbs_green.png');
 const sbsSet = (nebula: number): BgSet => ({
   aspect: 1,
   mirror: false,
@@ -198,59 +213,104 @@ const sbsSet = (nebula: number): BgSet => ({
   ],
 });
 
-export const BG_SETS: BgSet[] = [
-  // Broadly dark → colorful, so the shiny showpiece nebulae arrive as rewards
-  // deeper into the climb — with the teal/blue set pulled forward to second,
-  // since the near-black void that used to sit there read as a flat, dull
-  // stretch right after the equally dark opening view.
-  // Dark purple/rose haze (the opening view). Unlike the other SBS sets, the
-  // nebula is drawn IN FRONT of the starfields (at partial alpha so the stars
-  // still shine through) — a slow fog drifting over the stars.
+// --- Backgrounds: one environment is shown for the whole run; the player
+// picks (and buys) which one, exactly like avatars. `set` is the parallax
+// render config; `preview` is a single representative still for the shop. ---
+export interface BackgroundDef {
+  id: string;
+  name: string;
+  price: number; // in coins
+  preview: number; // require()'d still shown in the shop
+  set: BgSet;
+}
+
+export const BACKGROUNDS: BackgroundDef[] = [
+  // Dark purple/rose haze — the free starter (was the opening view). Unlike the
+  // other SBS sets, the nebula is drawn IN FRONT of the starfields (at partial
+  // alpha so the stars still shine through) — a slow fog drifting over stars.
   {
-    aspect: 1,
-    mirror: false,
-    layers: [
-      { src: SBS_STARS_MID, speed: 0.5, alpha: 1 },
-      { src: SBS_STARS_NEAR, speed: 1.0, alpha: 0.65 },
-      { src: require('../../assets/background/sbs_purple.png'), speed: 0.15, alpha: 0.6 },
-    ],
+    id: 'violet',
+    name: 'Violet Veil',
+    price: 0,
+    preview: SBS_PURPLE,
+    set: {
+      aspect: 1,
+      mirror: false,
+      layers: [
+        { src: SBS_STARS_MID, speed: 0.5, alpha: 1 },
+        { src: SBS_STARS_NEAR, speed: 1.0, alpha: 0.65 },
+        { src: SBS_PURPLE, speed: 0.15, alpha: 0.6 },
+      ],
+    },
   },
-  sbsSet(require('../../assets/background/sbs_blue.png')), // teal/blue wisps
-  spbgSet(
-    // void_02 — near-black quiet starfield
-    require('../../assets/background/bg1_base.jpg'),
-    require('../../assets/background/bg1_far.jpg'),
-    require('../../assets/background/bg1_mid.jpg'),
-    require('../../assets/background/bg1_near.jpg')
-  ),
-  spbgSet(
-    // stellar_03 — orange wisps on blue-grey
-    require('../../assets/background/bg2_base.jpg'),
-    require('../../assets/background/bg2_far.jpg'),
-    require('../../assets/background/bg2_mid.jpg'),
-    require('../../assets/background/bg2_near.jpg')
-  ),
-  spbgSet(
-    // stellar_01 — red/rust nebula (the showpiece)
-    require('../../assets/background/bg0_base.jpg'),
-    require('../../assets/background/bg0_far.jpg'),
-    require('../../assets/background/bg0_mid.jpg'),
-    require('../../assets/background/bg0_near.jpg')
-  ),
-  sbsSet(require('../../assets/background/sbs_green.png')), // vivid green aurora
-  spbgSet(
-    // stellar_05 — dusty pink/blue clouds
-    require('../../assets/background/bg3_base.jpg'),
-    require('../../assets/background/bg3_far.jpg'),
-    require('../../assets/background/bg3_mid.jpg'),
-    require('../../assets/background/bg3_near.jpg')
-  ),
+  {
+    id: 'azure',
+    name: 'Azure Drift', // teal/blue wisps
+    price: 120,
+    preview: SBS_BLUE,
+    set: sbsSet(SBS_BLUE),
+  },
+  {
+    id: 'void',
+    name: 'Deep Void', // void_02 — near-black quiet starfield
+    price: 90,
+    preview: require('../../assets/background/bg1_base.jpg'),
+    set: spbgSet(
+      require('../../assets/background/bg1_base.jpg'),
+      require('../../assets/background/bg1_far.jpg'),
+      require('../../assets/background/bg1_mid.jpg'),
+      require('../../assets/background/bg1_near.jpg')
+    ),
+  },
+  {
+    id: 'ember',
+    name: 'Ember Reach', // stellar_03 — orange wisps on blue-grey
+    price: 240,
+    preview: require('../../assets/background/bg2_base.jpg'),
+    set: spbgSet(
+      require('../../assets/background/bg2_base.jpg'),
+      require('../../assets/background/bg2_far.jpg'),
+      require('../../assets/background/bg2_mid.jpg'),
+      require('../../assets/background/bg2_near.jpg')
+    ),
+  },
+  {
+    id: 'crimson',
+    name: 'Crimson Cloud', // stellar_01 — red/rust nebula (the showpiece)
+    price: 450,
+    preview: require('../../assets/background/bg0_base.jpg'),
+    set: spbgSet(
+      require('../../assets/background/bg0_base.jpg'),
+      require('../../assets/background/bg0_far.jpg'),
+      require('../../assets/background/bg0_mid.jpg'),
+      require('../../assets/background/bg0_near.jpg')
+    ),
+  },
+  {
+    id: 'verdant',
+    name: 'Verdant Aurora', // vivid green aurora
+    price: 300,
+    preview: SBS_GREEN,
+    set: sbsSet(SBS_GREEN),
+  },
+  {
+    id: 'quartz',
+    name: 'Rose Quartz', // stellar_05 — dusty pink/blue clouds
+    price: 180,
+    preview: require('../../assets/background/bg3_base.jpg'),
+    set: spbgSet(
+      require('../../assets/background/bg3_base.jpg'),
+      require('../../assets/background/bg3_far.jpg'),
+      require('../../assets/background/bg3_mid.jpg'),
+      require('../../assets/background/bg3_near.jpg')
+    ),
+  },
 ];
+
+// Every background's parallax set — still consumed by the boot preloader.
+export const BG_SETS: BgSet[] = BACKGROUNDS.map((b) => b.set);
 export const BG_PX_PER_M = 0.4; // near-layer scroll px per meter climbed
 export const BG_DIM = 0.42; // dark scrim over the background so gameplay pops
-// The background advances one set every SHIP_WAVES waves (with the new ship
-// tier), drifting over slowly — like cruising into a different region of space.
-export const BG_FADE_S = 25; // seconds a background crossfade takes
 
 // --- Boot preload ---
 // Assets are fetched over HTTP from the Metro dev server in development and
@@ -277,10 +337,11 @@ export const GUN_LABEL: Record<string, string> = {
 
 // What a gun drop looks like while it's still falling. A pickup shows the gun's
 // own projectile art, so you can read what it gives before committing to the
-// grab. The laser is a drawn beam with no sprite, so it falls back to its emoji.
+// grab. 'double' is absent here — it renders two of the avatar's own shots
+// (see ObstacleView), since that art depends on the equipped ship.
 export const GUN_PICKUP_IMG: Partial<Record<GunKind, number>> = {
-  double: SHOT_NORMAL_IMG,
   bomb: SHOT_BOMB_IMG,
+  laser: SHOT_LASER_IMG,
   homing: SHOT_HOMING_IMG,
 };
 export const GUN_PICKUP_EMOJI: Record<GunKind, string> = {
@@ -291,6 +352,7 @@ export const GUN_PICKUP_EMOJI: Record<GunKind, string> = {
   homing: '🚀',
 };
 export const GIFT_ICON = 36; // rendered size of a gun-drop sprite
+export const GIFT_SHOT_LEN = 30; // length of each shot in the doubled 'double' pickup icon
 
 // --- Coins: the only currency. Collected in flight, spent on ships. ---
 export const COIN_EVERY = 6; // s between coin drops
@@ -321,6 +383,18 @@ export const PALETTE = {
   textDim: '#8B929D',
 };
 
+// --- Player fire-shot art. Each avatar has its own signature bolt (the normal
+// gun's projectile); pricier ships get flashier ones. Source sprites are
+// horizontal (point +x) and the renderer rotates them to face travel. `aspect`
+// is the source width/height; the shot is drawn PLAYER_SHOT_LEN px along its
+// length, with thickness = PLAYER_SHOT_LEN / aspect. ---
+export const PLAYER_SHOT_LEN = 62; // px, the bolt's on-screen length
+
+export interface ShotArt {
+  src: number;
+  aspect: number;
+}
+
 // --- Avatars: unlockable with coins ---
 export interface AvatarDef {
   id: string;
@@ -328,12 +402,34 @@ export interface AvatarDef {
   name: string;
   price: number; // in coins
   image?: number; // require()'d local asset (static path, resolved by Metro)
+  shot: ShotArt; // the ship's signature fire-shot art
 }
 
+// Each ship fires its own signature energy-orb bolt from the FX pack.
 export const AVATARS: AvatarDef[] = [
-  { id: 'ironclad', emoji: '🚀', name: 'Ironclad', price: 0, image: require('../../assets/avatars/pship1.png') },
-  { id: 'specter', emoji: '🚀', name: 'Specter', price: 60, image: require('../../assets/avatars/pship2.png') },
-  { id: 'raptor', emoji: '🚀', name: 'Raptor', price: 150, image: require('../../assets/avatars/pship3.png') },
-  { id: 'nova', emoji: '🚀', name: 'Nova', price: 300, image: require('../../assets/avatars/pship4.png') },
-  { id: 'valkyrie', emoji: '🚀', name: 'Valkyrie', price: 500, image: require('../../assets/avatars/pship5.png') },
+  {
+    id: 'ironclad', emoji: '🚀', name: 'Ironclad', price: 0,
+    image: require('../../assets/avatars/pship1.png'),
+    shot: { src: require('../../assets/bullets/pshot1.png'), aspect: 1.75 },
+  },
+  {
+    id: 'specter', emoji: '🚀', name: 'Specter', price: 60,
+    image: require('../../assets/avatars/pship2.png'),
+    shot: { src: require('../../assets/bullets/pshot2.png'), aspect: 1.739 },
+  },
+  {
+    id: 'raptor', emoji: '🚀', name: 'Raptor', price: 150,
+    image: require('../../assets/avatars/pship3.png'),
+    shot: { src: require('../../assets/bullets/pshot3.png'), aspect: 1.75 },
+  },
+  {
+    id: 'nova', emoji: '🚀', name: 'Nova', price: 300,
+    image: require('../../assets/avatars/pship4.png'),
+    shot: { src: require('../../assets/bullets/pshot4.png'), aspect: 1.739 },
+  },
+  {
+    id: 'valkyrie', emoji: '🚀', name: 'Valkyrie', price: 500,
+    image: require('../../assets/avatars/pship5.png'),
+    shot: { src: require('../../assets/bullets/pshot5.png'), aspect: 1.647 },
+  },
 ];

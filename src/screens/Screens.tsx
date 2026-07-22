@@ -1,9 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Image, StyleSheet, Pressable, ScrollView } from 'react-native';
-import { PALETTE, AVATARS, COIN_GOLD } from '../game/constants';
+import { PALETTE, AVATARS, BACKGROUNDS, COIN_GOLD } from '../game/constants';
 import { SaveData } from '../game/storage';
 import { RunResult } from '../game/types';
 import CoinIcon from '../components/Coin';
+
+// Shop catalogs are shown cheapest-first, so the price climbs as the player
+// scrolls down. Sorted once at module load (both source lists are static).
+const AVATARS_BY_PRICE = [...AVATARS].sort((a, b) => a.price - b.price);
+const BACKGROUNDS_BY_PRICE = [...BACKGROUNDS].sort((a, b) => a.price - b.price);
 
 // ---------- Menu ----------
 interface MenuProps {
@@ -35,7 +40,7 @@ export function MenuScreen({ save, onStart, onShop }: MenuProps) {
         <Text style={styles.primaryTxt}>LIFT OFF 🚀</Text>
       </Pressable>
       <Pressable onPress={onShop} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}>
-        <Text style={styles.secondaryTxt}>AVATARS</Text>
+        <Text style={styles.secondaryTxt}>SHOP</Text>
       </Pressable>
 
       <Text style={styles.hint}>
@@ -86,56 +91,128 @@ export function GameOverScreen({ result, best, isNewBest, onRestart, onMenu }: O
 }
 
 // ---------- Shop ----------
+type ShopTab = 'ships' | 'backgrounds';
+
 interface ShopProps {
   save: SaveData;
-  onBuy: (id: string) => void;
-  onSelect: (id: string) => void;
+  onBuyAvatar: (id: string) => void;
+  onSelectAvatar: (id: string) => void;
+  onBuyBackground: (id: string) => void;
+  onSelectBackground: (id: string) => void;
   onBack: () => void;
 }
 
-export function ShopScreen({ save, onBuy, onSelect, onBack }: ShopProps) {
+// A purchasable/equippable row: the price → owned → equipped states are the
+// same whether it holds an avatar or a background, so both tabs render this.
+interface ShopRowProps {
+  name: string;
+  price: number;
+  owned: boolean;
+  selected: boolean;
+  affordable: boolean;
+  thumb: React.ReactNode;
+  onPress: () => void;
+}
+
+function ShopRow({ name, price, owned, selected, affordable, thumb, onPress }: ShopRowProps) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.shopItem, selected && styles.shopItemSelected, pressed && styles.pressed]}
+    >
+      {thumb}
+      <View style={{ flex: 1 }}>
+        <Text style={styles.shopName}>{name}</Text>
+        {selected || owned ? (
+          <Text style={styles.shopPrice}>{selected ? 'EQUIPPED' : 'Tap to equip'}</Text>
+        ) : (
+          <View style={styles.shopPriceRow}>
+            <CoinIcon size={11} />
+            <Text style={[styles.shopPrice, { color: COIN_GOLD, marginTop: 0 }]}>{price}</Text>
+          </View>
+        )}
+      </View>
+      {!owned && !affordable && <Text style={styles.locked}>🔒</Text>}
+    </Pressable>
+  );
+}
+
+export function ShopScreen({
+  save,
+  onBuyAvatar,
+  onSelectAvatar,
+  onBuyBackground,
+  onSelectBackground,
+  onBack,
+}: ShopProps) {
+  const [tab, setTab] = useState<ShopTab>('ships');
+
   return (
     <View style={styles.screen}>
-      <Text style={styles.shopTitle}>AVATARS</Text>
+      <Text style={styles.shopTitle}>SHOP</Text>
       <View style={styles.shopWallet}>
         <CoinIcon size={16} />
         <Text style={styles.shopWalletTxt}>{save.likes} coins</Text>
       </View>
+
+      <View style={styles.tabs}>
+        <Pressable onPress={() => setTab('ships')} style={[styles.tab, tab === 'ships' && styles.tabActive]}>
+          <Text style={[styles.tabTxt, tab === 'ships' && styles.tabTxtActive]}>SHIPS</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setTab('backgrounds')}
+          style={[styles.tab, tab === 'backgrounds' && styles.tabActive]}
+        >
+          <Text style={[styles.tabTxt, tab === 'backgrounds' && styles.tabTxtActive]}>BACKGROUNDS</Text>
+        </Pressable>
+      </View>
+
       <ScrollView style={styles.shopList} contentContainerStyle={{ paddingBottom: 24 }}>
-        {AVATARS.map((a) => {
-          const owned = save.unlocked.includes(a.id);
-          const selected = save.selectedAvatar === a.id;
-          const affordable = save.likes >= a.price;
-          return (
-            <Pressable
-              key={a.id}
-              onPress={() => (owned ? onSelect(a.id) : affordable ? onBuy(a.id) : undefined)}
-              style={({ pressed }) => [
-                styles.shopItem,
-                selected && styles.shopItemSelected,
-                pressed && styles.pressed,
-              ]}
-            >
-              {a.image ? (
-                <Image source={a.image} style={styles.shopEmojiImg} resizeMode="contain" />
-              ) : (
-                <Text style={styles.shopEmoji}>{a.emoji}</Text>
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={styles.shopName}>{a.name}</Text>
-                {selected || owned ? (
-                  <Text style={styles.shopPrice}>{selected ? 'EQUIPPED' : 'Tap to equip'}</Text>
-                ) : (
-                  <View style={styles.shopPriceRow}>
-                    <CoinIcon size={11} />
-                    <Text style={[styles.shopPrice, { color: COIN_GOLD, marginTop: 0 }]}>{a.price}</Text>
-                  </View>
-                )}
-              </View>
-              {!owned && !affordable && <Text style={styles.locked}>🔒</Text>}
-            </Pressable>
-          );
-        })}
+        {tab === 'ships'
+          ? AVATARS_BY_PRICE.map((a) => {
+              const owned = save.unlocked.includes(a.id);
+              const selected = save.selectedAvatar === a.id;
+              const affordable = save.likes >= a.price;
+              return (
+                <ShopRow
+                  key={a.id}
+                  name={a.name}
+                  price={a.price}
+                  owned={owned}
+                  selected={selected}
+                  affordable={affordable}
+                  thumb={
+                    a.image ? (
+                      <Image source={a.image} style={styles.shopEmojiImg} resizeMode="contain" />
+                    ) : (
+                      <Text style={styles.shopEmoji}>{a.emoji}</Text>
+                    )
+                  }
+                  onPress={() =>
+                    owned ? onSelectAvatar(a.id) : affordable ? onBuyAvatar(a.id) : undefined
+                  }
+                />
+              );
+            })
+          : BACKGROUNDS_BY_PRICE.map((b) => {
+              const owned = save.unlockedBackgrounds.includes(b.id);
+              const selected = save.selectedBackground === b.id;
+              const affordable = save.likes >= b.price;
+              return (
+                <ShopRow
+                  key={b.id}
+                  name={b.name}
+                  price={b.price}
+                  owned={owned}
+                  selected={selected}
+                  affordable={affordable}
+                  thumb={<Image source={b.preview} style={styles.shopBgThumb} resizeMode="cover" />}
+                  onPress={() =>
+                    owned ? onSelectBackground(b.id) : affordable ? onBuyBackground(b.id) : undefined
+                  }
+                />
+              );
+            })}
       </ScrollView>
       <Pressable onPress={onBack} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}>
         <Text style={styles.secondaryTxt}>BACK</Text>
@@ -300,6 +377,37 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: '900',
     letterSpacing: 4,
+  },
+  tabs: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    gap: 8,
+    marginBottom: 4,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: PALETTE.cardBorder,
+    alignItems: 'center',
+  },
+  tabActive: {
+    backgroundColor: PALETTE.card,
+    borderColor: PALETTE.moment,
+  },
+  tabTxt: {
+    color: PALETTE.textDim,
+    fontSize: 12.5,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+  },
+  tabTxtActive: { color: PALETTE.text },
+  shopBgThumb: {
+    width: 62,
+    height: 46,
+    borderRadius: 8,
+    backgroundColor: '#04060E',
   },
   shopList: { alignSelf: 'stretch', marginTop: 8 },
   shopItem: {

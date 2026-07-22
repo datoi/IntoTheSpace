@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Image, StyleSheet, PanResponder, Pressable, AppState } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import ObstacleView from '../components/Obstacle';
-import { ParticleView, FloatTextView, HUD } from '../components/Effects';
+import { ParticleView, FloatTextView, HUD, HealthBar } from '../components/Effects';
 import { Card, Bullet, EnemyBullet, GunKind, GameState, RunResult } from '../game/types';
 import { play, playPop } from '../game/sounds';
 import {
@@ -38,8 +38,6 @@ import {
   LASER_FIRE_RATE,
   LASER_DMG,
   LASER_LEN,
-  LASER_COLOR,
-  LASER_EDGE,
   ROCKET_FIRE_RATE,
   ROCKET_DMG,
   ROCKET_SPEED,
@@ -68,12 +66,9 @@ import {
   WAVE_GAP,
   WAVE_BASE_ENEMIES,
   WAVE_MAX_ENEMIES,
-  BG_SETS,
   BgSet,
   BG_PX_PER_M,
   BG_DIM,
-  BG_FADE_S,
-  SHIP_WAVES,
   shipForWave,
   BOSS_MINI_HIT,
   BOSS_GIANT_HIT,
@@ -81,20 +76,23 @@ import {
   BOSS_GIANT_HP,
   BOSS_SWAY_AMP,
   BOSS_SWAY_FREQ,
-  SHOT_NORMAL_IMG,
   SHOT_HOMING_IMG,
   SHOT_BOMB_IMG,
-  SHOT_NORMAL_W,
-  SHOT_NORMAL_H,
-  SHOT_HOMING_W,
-  SHOT_HOMING_H,
-  SHOT_BOMB_SIZE,
+  SHOT_LASER_IMG,
+  SHOT_BOMB_W,
+  SHOT_BOMB_H,
+  SHOT_LASER_LEN,
+  SHOT_LASER_THICK,
+  SHOT_HOMING_LEN,
+  SHOT_HOMING_THICK,
   ENEMY_BULLET_ART_SCALE,
   AVATAR_IMG_W,
   AVATAR_IMG_H,
-  LASERSHOTS,
-  LASERSHOT_ASPECT,
-  laserShotForShip,
+  ENEMY_SHOTS,
+  ENEMY_SHOT_ASPECT,
+  enemyShotForShip,
+  PLAYER_SHOT_LEN,
+  ShotArt,
   GUN_LABEL,
   PALETTE,
 } from '../game/constants';
@@ -103,6 +101,8 @@ interface Props {
   best: number;
   avatarEmoji: string;
   avatarImage?: number; // require()'d avatar image, if the selected avatar has one
+  avatarShot: ShotArt; // the selected ship's signature fire-shot art
+  background: BgSet; // the one environment shown for the whole run
   resume?: GameState | null; // restore an in-progress run instead of starting fresh
   startPaused?: boolean; // resumed runs open on the pause screen
   onGameOver: (result: RunResult) => void;
@@ -122,9 +122,6 @@ function fresh(): GameState {
     dragging: false,
     alt: 0,
     wave: 0,
-    bgIdx: 0,
-    bgFade: 0,
-    bgTier: 0,
     waveClearTimer: 0.8, // first wave drops in quickly
     gun: 'single',
     gunTime: 0,
@@ -250,6 +247,8 @@ export default function GameScreen({
   best,
   avatarEmoji,
   avatarImage,
+  avatarShot,
+  background,
   resume,
   startPaused,
   onGameOver,
@@ -456,21 +455,6 @@ export default function GameScreen({
                 ? `⚠️ WAVE ${s.wave} — MINI BOSS`
                 : `WAVE ${s.wave}`;
           float(SCREEN.W / 2, SCREEN.H * 0.34, label, PALETTE.bell);
-        }
-      }
-
-      // Background: every SHIP_WAVES waves (with the new ship tier) start a
-      // slow crossfade to the next environment — a gradual drift, not a pop.
-      const bgTierNow = Math.floor(Math.max(0, s.wave - 1) / SHIP_WAVES);
-      if (s.bgFade === 0 && bgTierNow > s.bgTier) {
-        s.bgTier = bgTierNow;
-        s.bgFade = 0.0001;
-      }
-      if (s.bgFade > 0) {
-        s.bgFade += dt / BG_FADE_S;
-        if (s.bgFade >= 1) {
-          s.bgIdx = (s.bgIdx + 1) % BG_SETS.length;
-          s.bgFade = 0;
         }
       }
 
@@ -756,9 +740,13 @@ export default function GameScreen({
             t = nearestHazard(s.cards, b.y, claimed) ?? nearestHazard(s.cards, b.y);
             b.targetId = t?.id;
           }
+          const preX = b.x;
           if (t) b.x += (cardX(t) - b.x) * Math.min(8 * dt, 1);
           b.x += Math.sin(s.elapsed * 16 + (b.phase ?? 0)) * 140 * dt;
           b.y -= ROCKET_SPEED * dt;
+          // Face where it's actually heading (mostly up, leaning toward its
+          // target), so the bolt sprite points along travel instead of sideways.
+          b.angle = (Math.atan2(-ROCKET_SPEED * dt, b.x - preX) * 180) / Math.PI;
         } else if (b.kind === 'laser') {
           b.y -= BULLET_SPEED * 1.6 * dt;
         } else {
@@ -895,21 +883,17 @@ export default function GameScreen({
     : 0;
   const flame = 1 + 0.25 * Math.sin(s.elapsed * 30);
 
-  // Background: s.bgIdx/s.bgFade advance every SHIP_WAVES waves (see update).
-  // Smoothstep-ease the long crossfade so it drifts in and out gently. The
-  // next set stays mounted at near-zero opacity even while idle, keeping its
-  // images decoded — a cold mount at fade start flashed black and let layers
-  // pop in late.
-  const bgIdx = s.bgIdx % BG_SETS.length;
-  const bgNextIdx = (bgIdx + 1) % BG_SETS.length;
-  const bgEased = s.bgFade * s.bgFade * (3 - 2 * s.bgFade);
-  const bgNextAlpha = Math.max(bgEased, 0.002);
+  // Player normal-shot art (avatar-specific). Source sprites point +x, so the
+  // bolt is laid out horizontally (length × thickness) and rotated -90° to fly
+  // up; the layout box is centered on the bullet so rotation keeps it centered.
+  const shotLen = PLAYER_SHOT_LEN;
+  const shotThick = PLAYER_SHOT_LEN / avatarShot.aspect;
 
   return (
     <View style={[styles.wrap, { backgroundColor: SPACE_BLACK }]} {...pan.panHandlers}>
       <View style={[styles.shakeLayer, { transform: [{ translateX: shakeX }, { translateY: shakeY }] }]}>
-        {renderBgSet(BG_SETS[bgIdx], s.alt, 1, `s${bgIdx}_`)}
-        {bgNextAlpha > 0 && renderBgSet(BG_SETS[bgNextIdx], s.alt, bgNextAlpha, `s${bgNextIdx}_`)}
+        {/* One fixed environment for the whole run — the player's chosen background. */}
+        {renderBgSet(background, s.alt, 1, 'bg_')}
         {/* Dark scrim so gameplay reads clearly over the bright nebulae. */}
         <View
           pointerEvents="none"
@@ -928,17 +912,18 @@ export default function GameScreen({
             a cold Image view can take frames to fetch/decode its source,
             which made fast bullets invisible near the ship. */}
         <View pointerEvents="none" style={styles.prewarm}>
-          <Image source={SHOT_NORMAL_IMG} fadeDuration={0} style={{ width: SHOT_NORMAL_W, height: SHOT_NORMAL_H }} />
-          <Image source={SHOT_HOMING_IMG} fadeDuration={0} style={{ width: SHOT_HOMING_W, height: SHOT_HOMING_H }} />
-          <Image source={SHOT_BOMB_IMG} fadeDuration={0} style={{ width: SHOT_BOMB_SIZE, height: SHOT_BOMB_SIZE }} />
-          {LASERSHOTS.map((src, i) => (
+          <Image source={avatarShot.src} fadeDuration={0} style={{ width: shotLen, height: shotThick }} />
+          <Image source={SHOT_HOMING_IMG} fadeDuration={0} style={{ width: SHOT_HOMING_LEN, height: SHOT_HOMING_THICK }} />
+          <Image source={SHOT_BOMB_IMG} fadeDuration={0} style={{ width: SHOT_BOMB_W, height: SHOT_BOMB_H }} />
+          <Image source={SHOT_LASER_IMG} fadeDuration={0} style={{ width: SHOT_LASER_LEN, height: SHOT_LASER_THICK }} />
+          {ENEMY_SHOTS.map((src, i) => (
             <Image
               key={i}
               source={src}
               fadeDuration={0}
               style={{
                 width: ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE,
-                height: (ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE) / LASERSHOT_ASPECT[i],
+                height: (ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE) / ENEMY_SHOT_ASPECT[i],
               }}
             />
           ))}
@@ -953,6 +938,7 @@ export default function GameScreen({
             each new shot invisible for its first stretch of flight). */}
         {s.bullets.map((b, i) =>
           b.kind === 'bomb' ? (
+            // Source art streaks sideways; rotate it so it flies nose-up.
             <Image
               key={i}
               source={SHOT_BOMB_IMG}
@@ -960,14 +946,30 @@ export default function GameScreen({
               fadeDuration={0}
               style={{
                 position: 'absolute',
-                left: b.x - SHOT_BOMB_SIZE / 2,
-                top: b.y - SHOT_BOMB_SIZE / 2,
-                width: SHOT_BOMB_SIZE,
-                height: SHOT_BOMB_SIZE,
+                left: b.x - SHOT_BOMB_W / 2,
+                top: b.y - SHOT_BOMB_H / 2,
+                width: SHOT_BOMB_W,
+                height: SHOT_BOMB_H,
+                transform: [{ rotate: '180deg' }],
               }}
             />
           ) : b.kind === 'laser' ? (
-            <View key={i} style={[styles.laser, { left: b.x - 3, top: b.y }]} pointerEvents="none" />
+            // Beam-bolt: laid out along its LASER_LEN reach (tip at b.y, tail
+            // below) and rotated -90° so its bright head leads upward.
+            <Image
+              key={i}
+              source={SHOT_LASER_IMG}
+              resizeMode="contain"
+              fadeDuration={0}
+              style={{
+                position: 'absolute',
+                left: b.x - SHOT_LASER_LEN / 2,
+                top: b.y + SHOT_LASER_LEN / 2 - SHOT_LASER_THICK / 2,
+                width: SHOT_LASER_LEN,
+                height: SHOT_LASER_THICK,
+                transform: [{ rotate: '-90deg' }],
+              }}
+            />
           ) : b.kind === 'rocket' ? (
             <Image
               key={i}
@@ -976,30 +978,34 @@ export default function GameScreen({
               fadeDuration={0}
               style={{
                 position: 'absolute',
-                left: b.x - SHOT_HOMING_W / 2,
-                top: b.y - SHOT_HOMING_H / 2,
-                width: SHOT_HOMING_W,
-                height: SHOT_HOMING_H,
+                left: b.x - SHOT_HOMING_LEN / 2,
+                top: b.y - SHOT_HOMING_THICK / 2,
+                width: SHOT_HOMING_LEN,
+                height: SHOT_HOMING_THICK,
+                transform: [{ rotate: `${b.angle ?? -90}deg` }],
               }}
             />
           ) : (
+            // Normal shot: the avatar's signature bolt. Laid out horizontally
+            // (source points +x) and rotated -90° so its head leads upward.
             <Image
               key={i}
-              source={SHOT_NORMAL_IMG}
+              source={avatarShot.src}
               resizeMode="contain"
               fadeDuration={0}
               style={{
                 position: 'absolute',
-                left: b.x - SHOT_NORMAL_W / 2,
-                top: b.y - SHOT_NORMAL_H / 2,
-                width: SHOT_NORMAL_W,
-                height: SHOT_NORMAL_H,
+                left: b.x - shotLen / 2,
+                top: b.y - shotThick / 2,
+                width: shotLen,
+                height: shotThick,
+                transform: [{ rotate: '-90deg' }],
               }}
             />
           )
         )}
         {s.enemyBullets.map((b, i) => {
-          const artIdx = laserShotForShip(b.shipIdx ?? 0);
+          const artIdx = enemyShotForShip(b.shipIdx ?? 0);
           if (artIdx < 0) {
             return (
               <View
@@ -1019,15 +1025,17 @@ export default function GameScreen({
               />
             );
           }
-          // Sprite bullets: sized off the same base as the plain dot, drawn
-          // at the source art's aspect, rotated to face its direction of travel.
+          // Sprite bullets: sized off the same base as the plain dot, drawn at
+          // the source art's aspect, rotated to face its direction of travel.
+          // Missiles point UP in the source, so map their nose (0,-1) onto the
+          // velocity: rotate by atan2(vx, -vy) — e.g. straight down → 180°.
           const bw = b.size * ENEMY_BULLET_ART_SCALE;
-          const bh = bw / LASERSHOT_ASPECT[artIdx];
-          const angle = (Math.atan2(b.vy, b.vx) * 180) / Math.PI;
+          const bh = bw / ENEMY_SHOT_ASPECT[artIdx];
+          const angle = (Math.atan2(b.vx, -b.vy) * 180) / Math.PI;
           return (
             <Image
               key={i}
-              source={LASERSHOTS[artIdx]}
+              source={ENEMY_SHOTS[artIdx]}
               resizeMode="contain"
               fadeDuration={0}
               style={{
@@ -1042,7 +1050,7 @@ export default function GameScreen({
           );
         })}
         {s.cards.map((c) => (
-          <ObstacleView key={c.id} ob={c} />
+          <ObstacleView key={c.id} ob={c} avatarShot={avatarShot} />
         ))}
         {/* The vehicle: an image avatar (e.g. jet) flies as-is; otherwise the
             emoji rides a little rocket with a nose cone and flickering flame. */}
@@ -1085,13 +1093,13 @@ export default function GameScreen({
         />
       )}
       <HUD
-        hearts={s.hearts}
         coins={s.coins}
         alt={s.alt}
         gun={s.gun}
         gunTime={s.gunTime}
         gunLevel={s.gunLevel}
       />
+      <HealthBar hearts={s.hearts} />
       {!paused && (
         <Pressable onPress={doPause} hitSlop={12} style={styles.pauseBtn}>
           <Text style={styles.pauseIcon}>❚❚</Text>
@@ -1272,15 +1280,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: -300, // parked off-screen; images still load and warm the cache
     top: 0,
-  },
-  laser: {
-    position: 'absolute',
-    width: 6,
-    height: LASER_LEN,
-    borderRadius: 3,
-    backgroundColor: LASER_COLOR,
-    borderWidth: 1.5,
-    borderColor: LASER_EDGE,
   },
   vignette: {
     position: 'absolute',

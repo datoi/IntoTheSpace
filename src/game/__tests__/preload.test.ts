@@ -2,7 +2,7 @@ import { PRELOAD_SPRITES, PRELOAD_MODULES, preloadAssets } from '../preload';
 import {
   AVATARS,
   ENEMY_SHIPS,
-  LASERSHOTS,
+  ENEMY_SHOTS,
   BG_SETS,
   ENEMY_SHIP_VIS,
   PRELOAD_TIMEOUT_MS,
@@ -15,9 +15,12 @@ describe('preload — the sprite warm list', () => {
       expect(sources).toContain(img);
     }
     for (const ship of ENEMY_SHIPS) expect(sources).toContain(ship);
-    for (const shot of LASERSHOTS) expect(sources).toContain(shot);
-    // avatars + 6 ships + 2 bosses + 3 player shots + 5 lasershots
-    expect(PRELOAD_SPRITES.length).toBe(AVATARS.length + ENEMY_SHIPS.length + 2 + 3 + LASERSHOTS.length);
+    for (const shot of ENEMY_SHOTS) expect(sources).toContain(shot);
+    for (const a of AVATARS) expect(sources).toContain(a.shot.src);
+    // avatar images + 6 ships + 2 bosses + 3 gun shots + avatar shots + enemy shots
+    expect(PRELOAD_SPRITES.length).toBe(
+      AVATARS.length + ENEMY_SHIPS.length + 2 + 3 + AVATARS.length + ENEMY_SHOTS.length
+    );
   });
 
   it('warms sprites at a real, positive render size', () => {
