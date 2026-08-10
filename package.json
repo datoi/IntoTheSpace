@@ -28,7 +28,9 @@
     "start": "expo start",
     "ios": "expo start --ios",
     "android": "expo start --android",
-    "test": "jest"
+    "test": "jest",
+    "start:lan": "expo start --lan",
+    "start:perf": "node scripts/start-perf.mjs"
   },
   "jest": {
     "preset": "jest-expo",
