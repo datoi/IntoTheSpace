@@ -7,7 +7,7 @@
 
 import React, { useState } from 'react';
 import { View, Text, Image, StyleSheet, Pressable, ScrollView } from 'react-native';
-import { PALETTE, AVATARS, COIN_GOLD } from '../game/constants';
+import { PALETTE, AVATARS, avatarSprite, SHIP_LEVELS, COIN_GOLD } from '../game/constants';
 import { SaveData, balanceOf } from '../game/storage';
 import {
   CURRENCY_DEFS,
@@ -24,6 +24,7 @@ import {
   UPGRADE_ORDER,
   UPGRADE_TRACKS,
   maxLevelOf,
+  TIER_THRESHOLDS,
   resolveShipStats,
   upgradeCost,
 } from '../game/upgrades';
@@ -108,6 +109,8 @@ export function HangarScreen({ save, shipStats, onBuyUpgrade, onSelectAvatar, on
   // any OTHER hull the player is browsing is resolved here.
   const stats = isEquipped ? shipStats : resolveShipStats(save.upgrades, ship.id);
   const bal = balanceOf(save);
+  // Investment that earns this hull its next build, or null once fully built.
+  const nextBuildAt = TIER_THRESHOLDS.find((t) => stats.investment < t) ?? null;
 
   return (
     <View style={styles.screen}>
@@ -126,7 +129,14 @@ export function HangarScreen({ save, shipStats, onBuyUpgrade, onSelectAvatar, on
               pressed && styles.pressed,
             ]}
           >
-            <Image source={a.image} style={styles.shipChipImg} resizeMode="contain" />
+            {/* Per-hull, not the equipped one: upgrades are per-ship, so the
+                picker has to show each at its own build or it misreports where
+                the investment went. */}
+            <Image
+              source={avatarSprite(a, resolveShipStats(save.upgrades, a.id).tier)}
+              style={styles.shipChipImg}
+              resizeMode="contain"
+            />
             <Text style={[styles.shipChipTxt, viewing === a.id && styles.shipChipTxtActive]}>
               {a.name}
             </Text>
@@ -138,7 +148,18 @@ export function HangarScreen({ save, shipStats, onBuyUpgrade, onSelectAvatar, on
       <View style={styles.summary}>
         <Text style={styles.summaryTitle}>
           {ship.name}
-          {stats.tier > 0 ? ` · TIER ${stats.tier}` : ''}
+          {` · MK ${stats.tier + 1}`}
+        </Text>
+        {/* The build is now a THING YOU SEE, so say how far the next one is.
+            The hull visibly gains wings and guns at every threshold, and a
+            player who cannot tell that is coming reads their upgrades as pure
+            numbers — this is the line that turns spend into anticipation. */}
+        <Text style={styles.summaryLine}>
+          {nextBuildAt === null
+            ? `Fully built · MK ${stats.tier + 1} of ${SHIP_LEVELS}`
+            : `${nextBuildAt - stats.investment} more level${
+                nextBuildAt - stats.investment === 1 ? '' : 's'
+              } to MK ${stats.tier + 2}`}
         </Text>
         <Text style={styles.summaryLine}>
           {stats.investment} level{stats.investment === 1 ? '' : 's'} invested ·{' '}

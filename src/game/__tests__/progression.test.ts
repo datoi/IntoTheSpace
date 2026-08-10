@@ -26,12 +26,13 @@ import {
   UPGRADE_TRACKS,
   isMaxed,
   maxLevelOf,
+  TIER_THRESHOLDS,
   resolveShipStats,
   rollDamage,
   upgradeCost,
   visualTier,
 } from '../upgrades';
-import { AVATARS, FIRE_RATE, HEARTS_START, HEARTS_MAX, BULLET_SPEED } from '../constants';
+import { AVATARS, SHIP_LEVELS, avatarSprite, FIRE_RATE, HEARTS_START, HEARTS_MAX, BULLET_SPEED } from '../constants';
 
 const SHIP = 'ironclad';
 const shipIds = AVATARS.map((a) => a.id);
@@ -228,8 +229,24 @@ describe('resolveShipStats', () => {
 
   it('visual tier steps up with total investment', () => {
     expect(visualTier(0)).toBe(0);
-    expect(visualTier(8)).toBe(1);
-    expect(visualTier(999)).toBe(3);
+    expect(visualTier(TIER_THRESHOLDS[0])).toBe(1);
+    // Derived, so adding a build level does not fail an unrelated assertion.
+    expect(visualTier(999)).toBe(TIER_THRESHOLDS.length);
+  });
+
+  it('has one tier step per extra hull build, so every sprite is reachable', () => {
+    // tier 0 is the base build and each threshold earns the next sprite, so a
+    // hull with SHIP_LEVELS looks needs exactly SHIP_LEVELS - 1 thresholds.
+    // Without this, art ships that no amount of investment can ever show.
+    expect(TIER_THRESHOLDS).toHaveLength(SHIP_LEVELS - 1);
+    for (const a of AVATARS) expect(a.levels).toHaveLength(SHIP_LEVELS);
+  });
+
+  it('keeps the top build reachable', () => {
+    // The dearest threshold must be inside what the tracks can actually total,
+    // or the final sprite is decoration nobody can earn.
+    const maxInvestment = UPGRADE_ORDER.reduce((sum, k) => sum + maxLevelOf(k), 0);
+    expect(TIER_THRESHOLDS[TIER_THRESHOLDS.length - 1]).toBeLessThan(maxInvestment);
   });
 });
 
@@ -256,5 +273,58 @@ describe('rollDamage', () => {
   it('applies the damage multiplier on a non-crit too', () => {
     const stats = resolveShipStats(withLevel({}, SHIP, 'damage', 5), SHIP);
     expect(rollDamage(10, stats, () => 0.99).dmg).toBeCloseTo(10 * stats.dmgMult);
+  });
+});
+
+describe('the hull you fly is the hull you built', () => {
+  // The feature: upgrade investment crosses a threshold, the ship on screen
+  // becomes a visibly bigger build. visualTier used to be computed and then
+  // only printed as a number, so it could drift from the art with nothing
+  // noticing.
+  const ship = AVATARS[0];
+
+  it('starts every hull on its base build', () => {
+    expect(avatarSprite(ship, resolveShipStats({}, ship.id).tier)).toBe(ship.levels[0]);
+  });
+
+  it('swaps sprite at every threshold, and only at a threshold', () => {
+    const spriteAt = (investment: number) => avatarSprite(ship, visualTier(investment));
+    for (let i = 0; i < TIER_THRESHOLDS.length; i++) {
+      const at = TIER_THRESHOLDS[i];
+      // One short of the threshold is still the previous build…
+      expect(spriteAt(at - 1)).toBe(ship.levels[i]);
+      // …and landing on it earns the next.
+      expect(spriteAt(at)).toBe(ship.levels[i + 1]);
+    }
+  });
+
+  it('reaches the top build, and never indexes past it', () => {
+    expect(avatarSprite(ship, visualTier(999))).toBe(ship.levels[SHIP_LEVELS - 1]);
+    // A tier from a corrupt or future save must not hand React `undefined`.
+    expect(avatarSprite(ship, 99)).toBe(ship.levels[SHIP_LEVELS - 1]);
+    expect(avatarSprite(ship, -5)).toBe(ship.levels[0]);
+    expect(avatarSprite(ship, NaN)).toBe(ship.levels[0]);
+  });
+
+  it('gives every hull its own art at every level', () => {
+    // Two bodies are shared across five hulls under a hue rotation, so the
+    // FILES must still all differ — a copy-paste in the catalog would show one
+    // hull wearing another's colours.
+    const all = AVATARS.flatMap((a) => a.levels);
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  it('leaves the hitbox alone as a hull levels up', () => {
+    // Every build is drawn in the same box (see scripts/make-ships.mjs). An
+    // upgrade that quietly enlarged the player's own target would be a
+    // punishment dressed as a reward, and nothing at runtime would reveal it.
+    const base = resolveShipStats({}, ship.id);
+    let book = {};
+    for (const kind of UPGRADE_ORDER) book = withLevel(book, ship.id, kind, maxLevelOf(kind));
+    const maxed = resolveShipStats(book, ship.id);
+    expect(maxed.tier).toBeGreaterThan(base.tier);
+    // AVATAR_SIZE is the collision box and is a module constant, not per-tier;
+    // this asserts the stats block never grew a size field to diverge from it.
+    expect(Object.keys(maxed)).toEqual(Object.keys(base));
   });
 });

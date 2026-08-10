@@ -100,7 +100,7 @@ const renderGame = async (resume?: GameState, extraProps: Record<string, unknown
   await render(
     <GameScreen
       best={0}
-      avatarImage={AVATARS[0].image}
+      avatarImage={AVATARS[0].levels[0]}
       avatarShot={AVATARS[0].shot}
       avatarSpecial={AVATARS[0].special}
       shipStats={BASE_SHIP_STATS}
@@ -862,12 +862,12 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
   it('Specter — PHANTOMS: two ghost hulls join you, then fade', async () => {
     await renderGame(armed(), { avatarSpecial: 'phantom' });
     await advance(50);
-    expect(countImages(AVATARS[0].image)).toBe(1); // just the ship
+    expect(countImages(AVATARS[0].levels[0])).toBe(1); // just the ship
     await fireEvent.press(screen.getByText('FIRE'));
     await advance(50);
-    expect(countImages(AVATARS[0].image)).toBe(3); // ship + two ghosts
+    expect(countImages(AVATARS[0].levels[0])).toBe(3); // ship + two ghosts
     await advance(PHANTOM_TIME * 1000 + 200);
-    expect(countImages(AVATARS[0].image)).toBe(1); // dissolved
+    expect(countImages(AVATARS[0].levels[0])).toBe(1); // dissolved
   });
 
   it('Raptor — TALONS: fans of claws hose out for the whole barrage', async () => {

@@ -47,11 +47,10 @@ export interface PreloadSprite {
 // devices. A run shows only one set (the player's pick), and it gets file-level
 // caching below — its layers decode on GameScreen mount, before the climb.
 export const PRELOAD_SPRITES: PreloadSprite[] = [
-  ...AVATARS.map((a) => a.image).filter((src): src is number => src != null).map((src) => ({
-    src,
-    w: AVATAR_IMG_W,
-    h: AVATAR_IMG_H,
-  })),
+  // Every hull at every build level. A hull swaps sprite the moment an
+  // upgrade crosses a tier threshold, and that happens in the Hangar with the
+  // ship on screen — a cold decode there is a visible blank.
+  ...AVATARS.flatMap((a) => a.levels).map((src) => ({ src, w: AVATAR_IMG_W, h: AVATAR_IMG_H })),
   ...ENEMY_SHIPS.map((src) => ({ src, w: ENEMY_SHIP_VIS, h: ENEMY_SHIP_VIS })),
   { src: BOSS_MINI_IMG, w: BOSS_MINI_VIS, h: BOSS_MINI_VIS },
   { src: BOSS_GIANT_IMG, w: BOSS_GIANT_VIS, h: BOSS_GIANT_VIS },

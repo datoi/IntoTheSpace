@@ -36,7 +36,7 @@ import { FONT_MAP } from './src/game/type';
 import { preloadAssets } from './src/game/preload';
 import { initSounds } from './src/game/sounds';
 import { GamePhase, GameState, RunResult } from './src/game/types';
-import { PALETTE, AVATARS, BACKGROUNDS, DECODE_GRACE_MS, MIN_LOADING_MS, FONT_GRACE_MS } from './src/game/constants';
+import { PALETTE, AVATARS, BACKGROUNDS, avatarSprite, DECODE_GRACE_MS, MIN_LOADING_MS, FONT_GRACE_MS } from './src/game/constants';
 
 // TEMP dev switch — lets you browse/equip every ship and background for free
 // (the shop shows a full wallet and nothing is locked). It does NOT spend or
@@ -356,7 +356,6 @@ export default function App() {
     : save;
 
   const selectedAvatar = AVATARS.find((a) => a.id === save.selectedAvatar) ?? AVATARS[0];
-  const avatarImage = selectedAvatar.image;
   const selectedBackground = BACKGROUNDS.find((b) => b.id === save.selectedBackground) ?? BACKGROUNDS[0];
   // The equipped hull's permanent upgrades, flattened to the numbers the game
   // loop reads. Recomputed only when the ship or its levels actually change,
@@ -366,6 +365,11 @@ export default function App() {
     () => resolveShipStats(save.upgrades, save.selectedAvatar),
     [save.upgrades, save.selectedAvatar]
   );
+  // The hull as it is actually built: upgrade investment earns a cosmetic tier
+  // (see TIER_THRESHOLDS) and that tier picks one of five sprites, so the ship
+  // on screen grows with the ship in the numbers.
+  const avatarImage = avatarSprite(selectedAvatar, shipStats.tier);
+
   // Badge on the menu's OBJECTIVES button. Recomputed only when progress moves,
   // since it walks every catalog.
   const rewardsWaiting = useMemo(

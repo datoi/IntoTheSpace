@@ -11,6 +11,7 @@ import {
   EXPLOSION_BOSS,
   EXPLOSION_BOSS_SCALE,
   EXPLOSION_VIS,
+  SHIP_LEVELS,
   explosionForShip,
   PRELOAD_TIMEOUT_MS,
 } from '../constants';
@@ -18,7 +19,10 @@ import {
 describe('preload — the sprite warm list', () => {
   it('covers every avatar, enemy tier, boss and projectile', () => {
     const sources = PRELOAD_SPRITES.map((s) => s.src);
-    for (const img of AVATARS.map((a) => a.image).filter((i) => i != null)) {
+    // Every build level of every hull: a hull swaps sprite when investment
+    // crosses a tier threshold, and a level that was never warmed decodes cold
+    // in the Hangar with the ship on screen.
+    for (const img of AVATARS.flatMap((a) => a.levels)) {
       expect(sources).toContain(img);
     }
     for (const ship of ENEMY_SHIPS) expect(sources).toContain(ship);
@@ -27,11 +31,11 @@ describe('preload — the sprite warm list', () => {
     // Every explosion sheet. One sheet holds a whole style, so warming it
     // warms all EXPLOSION_FRAMES at once and no decode can land mid-burst.
     for (const sheet of EXPLOSION_SHEETS) expect(sources).toContain(sheet);
-    // avatar images + ships + 2 bosses + 3 gun shots + avatar shots
-    // + enemy shots + one sheet per style + the boss sheet warmed AGAIN at the
-    // larger size a boss draws it (see below)
+    // every hull x every build level + enemy ships + 2 bosses + 3 gun shots
+    // + avatar shots + enemy shots + one sheet per style + the boss sheet
+    // warmed AGAIN at the larger size a boss draws it (see below)
     expect(PRELOAD_SPRITES.length).toBe(
-      AVATARS.length +
+      AVATARS.length * SHIP_LEVELS +
         ENEMY_SHIPS.length +
         2 +
         3 +

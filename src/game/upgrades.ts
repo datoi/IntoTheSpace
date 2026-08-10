@@ -232,14 +232,22 @@ export interface ShipStats {
   dragLerp: number; // how sharply the hull tracks the finger
   bombCapacity: number;
   bombDmg: number;
-  /** 0..3 cosmetic tier — how visibly souped-up the hull looks. */
+  /** 0..4 cosmetic tier — which of the five hull builds is flown. */
   tier: number;
   /** Sum of all levels bought on this hull. */
   investment: number;
 }
 
-/** Total levels bought that earn each visual tier. */
-export const TIER_THRESHOLDS = [8, 20, 36];
+/**
+ * Investment that earns each build level, so tier 0..4 = the five hull sprites.
+ *
+ * The first three are unchanged from when this drove nothing but a label, so no
+ * existing hull silently drops a level. The fourth is deliberately far out (78
+ * is the theoretical maximum across all nine tracks): the top build should be
+ * something a player is still working toward deep into a save, not a milestone
+ * they pass without noticing.
+ */
+export const TIER_THRESHOLDS = [8, 20, 36, 56];
 
 export function visualTier(investment: number): number {
   let tier = 0;

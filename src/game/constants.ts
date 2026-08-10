@@ -1413,9 +1413,19 @@ export interface AvatarDef {
   id: string;
   name: string;
   price: number; // in coins
-  /** require()'d local asset. Required — every hull ships art, and the emoji
-   *  fallback this replaced was a dead branch carrying the last emoji in the app. */
-  image: number;
+  /**
+   * The hull at each build level, LOWEST FIRST — exactly SHIP_LEVELS entries.
+   *
+   * A hull is not one sprite any more: every step of upgrade investment that
+   * crosses a TIER_THRESHOLD swaps it for a visibly bigger build, more wings
+   * and more guns. That was the point of visualTier, which until now was
+   * computed and then only printed as a number in the Hangar.
+   *
+   * Every level is drawn in the SAME box, so leveling up never changes the
+   * hitbox — an upgrade that quietly enlarged your own target would be a
+   * punishment dressed as a reward. See scripts/make-ships.mjs.
+   */
+  levels: number[];
   shot: ShotArt; // the ship's signature fire-shot art
   special: SpecialKind; // its FIRE-button ultimate — the reason to buy it
 }
@@ -1443,32 +1453,75 @@ export interface AvatarDef {
 export const AVATARS: AvatarDef[] = [
   {
     id: 'ironclad', name: 'Ironclad', price: 0,
-    image: require('../../assets/avatars/pship1.png'),
+    levels: [
+      require('../../assets/avatars/ironclad_l1.png'),
+      require('../../assets/avatars/ironclad_l2.png'),
+      require('../../assets/avatars/ironclad_l3.png'),
+      require('../../assets/avatars/ironclad_l4.png'),
+      require('../../assets/avatars/ironclad_l5.png'),
+    ],
     shot: { src: require('../../assets/bullets/pshot1.png'), aspect: 63 / 165, tint: PALETTE.plasma }, // pack 9, cyan #1BD2EB
     special: 'bulwark', // armour, not tricks — so its ultimate is a shell
   },
   {
     id: 'specter', name: 'Specter', price: 60,
-    image: require('../../assets/avatars/pship2.png'),
+    levels: [
+      require('../../assets/avatars/specter_l1.png'),
+      require('../../assets/avatars/specter_l2.png'),
+      require('../../assets/avatars/specter_l3.png'),
+      require('../../assets/avatars/specter_l4.png'),
+      require('../../assets/avatars/specter_l5.png'),
+    ],
     shot: { src: require('../../assets/bullets/pshot2.png'), aspect: 63 / 165, tint: '#3DE0C0' }, // pack 8, teal #18E7B9
     special: 'phantom', // a specter haunts: ghosts of itself fly alongside
   },
   {
     id: 'raptor', name: 'Raptor', price: 150,
-    image: require('../../assets/avatars/pship3.png'),
+    levels: [
+      require('../../assets/avatars/raptor_l1.png'),
+      require('../../assets/avatars/raptor_l2.png'),
+      require('../../assets/avatars/raptor_l3.png'),
+      require('../../assets/avatars/raptor_l4.png'),
+      require('../../assets/avatars/raptor_l5.png'),
+    ],
     shot: { src: require('../../assets/bullets/pshot3.png'), aspect: 63 / 165, tint: PALETTE.violet }, // pack 13, purple #A242F4
     special: 'talons', // a raptor strikes with its claws
   },
   {
     id: 'valkyrie', name: 'Valkyrie', price: 300,
-    image: require('../../assets/avatars/pship5.png'),
+    levels: [
+      require('../../assets/avatars/valkyrie_l1.png'),
+      require('../../assets/avatars/valkyrie_l2.png'),
+      require('../../assets/avatars/valkyrie_l3.png'),
+      require('../../assets/avatars/valkyrie_l4.png'),
+      require('../../assets/avatars/valkyrie_l5.png'),
+    ],
     shot: { src: require('../../assets/bullets/pshot5.png'), aspect: 63 / 165, tint: '#5BB0FF' }, // pack 10, blue #319AF1
     special: 'spears', // a valkyrie descends from the sky, spear in hand
   },
   {
     id: 'nova', name: 'Nova', price: 500,
-    image: require('../../assets/avatars/pship4.png'),
+    levels: [
+      require('../../assets/avatars/nova_l1.png'),
+      require('../../assets/avatars/nova_l2.png'),
+      require('../../assets/avatars/nova_l3.png'),
+      require('../../assets/avatars/nova_l4.png'),
+      require('../../assets/avatars/nova_l5.png'),
+    ],
     shot: { src: require('../../assets/bullets/pshot4.png'), aspect: 63 / 165, tint: PALETTE.gold }, // pack 4, yellow #E3D313
     special: 'nova', // a nova is a star detonating — so it detonates
   },
 ];
+
+/** Build levels every hull ships. Must match AvatarDef.levels and the art. */
+export const SHIP_LEVELS = 5;
+
+/**
+ * The sprite for a hull at a given cosmetic tier.
+ *
+ * Clamped rather than trusted: `tier` comes from upgrade investment, and a save
+ * written by a future build (or a corrupt one) must not index off the end and
+ * hand React `undefined` for a source.
+ */
+export const avatarSprite = (def: AvatarDef, tier: number): number =>
+  def.levels[Math.max(0, Math.min(def.levels.length - 1, Math.floor(tier) || 0))];

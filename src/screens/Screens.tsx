@@ -3,6 +3,7 @@ import { View, Text, Image, StyleSheet, Pressable, ScrollView, Animated, Easing 
 import {
   PALETTE,
   AVATARS,
+  avatarSprite,
   BACKGROUNDS,
   COIN_GOLD,
   GUN_PICKUP_IMG,
@@ -17,6 +18,7 @@ import CoinIcon from '../components/Coin';
 import Icon, { IconName } from '../components/Icon';
 import { Button, IconButton } from '../components/Button';
 import { RollingNumber, useReduceMotion } from '../components/Motion';
+import { resolveShipStats } from '../game/upgrades';
 
 // Shop catalogs are shown cheapest-first, so the price climbs as the player
 // scrolls down. Sorted once at module load (both source lists are static).
@@ -45,6 +47,8 @@ export function MenuScreen({
   onQuests,
 }: MenuProps) {
   const avatar = AVATARS.find((a) => a.id === save.selectedAvatar) ?? AVATARS[0];
+  // Which of the hull's five builds the player's investment has earned.
+  const tier = resolveShipStats(save.upgrades, save.selectedAvatar).tier;
   const [showGuide, setShowGuide] = useState(false);
   // A slow bob, so the hull reads as hovering rather than pasted on. Native
   // driver: the menu has no loop, and this must not cost a JS frame.
@@ -95,7 +99,9 @@ export function MenuScreen({
             transform: [{ translateY: bob.interpolate({ inputRange: [0, 1], outputRange: [4, -4] }) }],
           }}
         >
-          <Image source={avatar.image} style={styles.menuAvatarImg} resizeMode="contain" />
+          {/* The pedestal shows the hull as BUILT, not as bought — the menu is
+              where a player admires what their upgrades produced. */}
+          <Image source={avatarSprite(avatar, tier)} style={styles.menuAvatarImg} resizeMode="contain" />
         </Animated.View>
         <Text style={styles.pedestalShip}>{avatar.name}</Text>
         <Text style={[styles.pedestalSpecial, { color: avatar.shot.tint }]}>
@@ -436,7 +442,9 @@ export function ShopScreen({
                   special={SPECIALS[a.special]}
                   tier={a.shot.tint}
                   thumb={
-                    <Image source={a.image} style={styles.shopHullImg} resizeMode="contain" />
+                    // Level 1: the shop sells a hull, not someone else's
+                    // upgrades, so it shows what you would actually fly.
+                    <Image source={avatarSprite(a, 0)} style={styles.shopHullImg} resizeMode="contain" />
                   }
                   onPress={() =>
                     owned ? onSelectAvatar(a.id) : affordable ? onBuyAvatar(a.id) : undefined
