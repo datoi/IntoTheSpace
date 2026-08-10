@@ -217,18 +217,19 @@ export const ParallaxBackground = React.memo(function ParallaxBackground({
           style={{ position: 'absolute', left: 0, top: 0, width: CLIP_W, height: CLIP_H }}
         />
       )}
+      {/* Planets go BEHIND every star layer, directly on the nebula.
+          This is what makes them read as being IN space rather than pasted on
+          top of it. They used to be drawn one from the front, so nothing ever
+          passed between the player and a planet and the eye had no distance cue
+          to work with — a planet the size of half the screen at full opacity in
+          front of the starfield reads as a sticker on the lens.
+          Now the near starfield drifts ACROSS them, and something crossing in
+          front of an object is the strongest depth cue available in 2D. It also
+          means the planets are subject to the same layering as everything else
+          distant, instead of being a special case at the front. */}
+      {planet && <PlanetField planet={planet} anim={planetAnim} />}
       {layers.map((L, li) => (
-        <React.Fragment key={li}>
-          {renderLayer(L, li)}
-          {/* Planets sit just behind the NEAREST wisp layer: near enough to stay
-              clearly visible (even on the near-black void), but with that last
-              layer drifting in front for a touch of depth. Keyed off the layers
-              actually DRAWN, so a trimmed sky still puts them one from the top
-              rather than dropping them off the end of the stack. */}
-          {li === Math.max(0, layers.length - 2) && planet && (
-            <PlanetField planet={planet} anim={planetAnim} />
-          )}
-        </React.Fragment>
+        <React.Fragment key={li}>{renderLayer(L, li)}</React.Fragment>
       ))}
     </View>
   );

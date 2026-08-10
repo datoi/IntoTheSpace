@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react-native';
 import { MenuScreen, GameOverScreen, ShopScreen } from '../Screens';
 import { SaveData, DEFAULT_SAVE } from '../../game/storage';
 import { RunResult } from '../../game/types';
-import { AVATARS } from '../../game/constants';
+import { AVATARS, BACKGROUNDS } from '../../game/constants';
 
 const freshSave: SaveData = { ...DEFAULT_SAVE };
 
@@ -197,9 +197,12 @@ describe('ShopScreen', () => {
   it('switches to the backgrounds tab and buys an affordable one', async () => {
     const { onBuyBackground, onSelectBackground } = await renderShop(richSave); // 200 coins
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
-    expect(screen.getByText('Deep Void')).toBeTruthy(); // 90 coins, affordable
-    await fireEvent.press(screen.getByText('Deep Void'));
-    expect(onBuyBackground).toHaveBeenCalledWith('void');
+    const cheapest = BACKGROUNDS.filter((b) => b.price > 0 && b.price <= richSave.likes).sort(
+      (x, y) => x.price - y.price
+    )[0];
+    expect(cheapest).toBeDefined();
+    await fireEvent.press(screen.getByText(cheapest.name));
+    expect(onBuyBackground).toHaveBeenCalledWith(cheapest.id);
     expect(onSelectBackground).not.toHaveBeenCalled();
   });
 
@@ -214,7 +217,11 @@ describe('ShopScreen', () => {
   it('locks a background the wallet cannot afford', async () => {
     const { onBuyBackground } = await renderShop(richSave); // 200 coins
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
-    await fireEvent.press(screen.getByText('Crimson Cloud')); // 450 coins
+    // Derived, not named: the catalog's contents are free to change, the rule
+    // that an unaffordable sky cannot be bought is not.
+    const dearest = [...BACKGROUNDS].sort((x, y) => y.price - x.price)[0];
+    expect(dearest.price).toBeGreaterThan(richSave.likes);
+    await fireEvent.press(screen.getByText(dearest.name));
     expect(onBuyBackground).not.toHaveBeenCalled();
   });
 });

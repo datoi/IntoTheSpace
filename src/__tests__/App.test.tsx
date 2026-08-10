@@ -4,7 +4,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react-native';
 import App from '../../App';
 import { freshRunState } from '../game/runstate';
 import { GameState } from '../game/types';
-import { AVATAR_Y, OB_HIT, DECODE_GRACE_MS, MIN_LOADING_MS, FONT_GRACE_MS } from '../game/constants';
+import { AVATAR_Y, OB_HIT, BACKGROUNDS, DECODE_GRACE_MS, MIN_LOADING_MS, FONT_GRACE_MS } from '../game/constants';
 
 const SAVE_KEY = 'doomscroll:save:v1';
 const RUN_KEY = 'doomscroll:run:v4';
@@ -276,7 +276,15 @@ describe('App — backgrounds economy', () => {
     await fireEvent.press(screen.getByText('SHOP'));
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
     // Cycle through several, then back to the first — each swaps the sky.
-    for (const name of ['Deep Void', 'Azure Drift', 'Rose Quartz', 'Violet Veil', 'Deep Void']) {
+    // Names come from the catalog so renaming a sky cannot fail an unrelated
+    // navigation test; the ids are what the save depends on and those are
+    // pinned by the compatibility test in constants.test.ts.
+    const nameOf = (id: string) => {
+      const def = BACKGROUNDS.find((b) => b.id === id);
+      if (!def) throw new Error(`background id '${id}' is gone from the catalog`);
+      return def.name;
+    };
+    for (const name of ['void', 'azure', 'quartz', 'violet', 'void'].map(nameOf)) {
       await fireEvent.press(screen.getByText(name));
       await advance(20);
       expect(screen.getByText('BACKGROUNDS')).toBeTruthy();
@@ -290,21 +298,23 @@ describe('App — backgrounds economy', () => {
     await bootApp();
     await fireEvent.press(screen.getByText('SHOP'));
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
-    await fireEvent.press(screen.getByText('Deep Void')); // costs 90
-    expect(screen.getByText('110 coins')).toBeTruthy();
+    const buy = BACKGROUNDS.filter((b) => b.price > 0).sort((x, y) => x.price - y.price)[0];
+    await fireEvent.press(screen.getByText(buy.name));
+    expect(screen.getByText(`${200 - buy.price} coins`)).toBeTruthy();
     expect(screen.getByText('EQUIPPED')).toBeTruthy();
     await advance(10);
     const stored = JSON.parse((await AsyncStorage.getItem(SAVE_KEY))!);
-    expect(stored.likes).toBe(110);
-    expect(stored.unlockedBackgrounds).toContain('void');
-    expect(stored.selectedBackground).toBe('void');
+    expect(stored.likes).toBe(200 - buy.price);
+    expect(stored.unlockedBackgrounds).toContain(buy.id);
+    expect(stored.selectedBackground).toBe(buy.id);
   });
 
   it('cannot buy a background it cannot afford', async () => {
     await bootApp();
     await fireEvent.press(screen.getByText('SHOP'));
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
-    await fireEvent.press(screen.getByText('Crimson Cloud')); // 450 > 200
+    const dearest = [...BACKGROUNDS].sort((x, y) => y.price - x.price)[0];
+    await fireEvent.press(screen.getByText(dearest.name));
     expect(screen.getByText('200 coins')).toBeTruthy();
     await advance(10);
     const stored = JSON.parse((await AsyncStorage.getItem(SAVE_KEY))!);
