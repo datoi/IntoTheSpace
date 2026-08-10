@@ -85,6 +85,7 @@ import {
   CHARGE_WAVE,
   ENEMY_BULLET_SIZE,
   MAX_ENEMY_BULLETS,
+  MAX_FLOATS,
   ZIG_AMP,
   ZIG_FREQ,
   ENEMY_HOMING_SPEED,
@@ -889,9 +890,20 @@ export default function GameScreen({
       s.explosions.push({ id: s.nextId++, x, y, t: 0, style, size });
     };
 
-    const float = (x: number, y: number, text: string, color: string) => {
+    /**
+     * Push a floating readout, recycling the oldest past MAX_FLOATS.
+     *
+     * The ONLY path that may append to s.floats — a <Text> is the priciest view
+     * the renderer makes, and a screen-clearing special pays one per kill on a
+     * single frame. Keeping the cap in one place is what stops that being
+     * reintroduced by the next call site that wants a number on screen.
+     */
+    const float = (x: number, y: number, text: string, color: string, life = 0.8) => {
       const s = g.current;
-      s.floats.push({ id: s.nextId++, x, y, text, color, life: 0.8 });
+      // `while`, not `if`: mirrors playExplosion, and drains correctly however
+      // many are somehow over the line.
+      while (s.floats.length >= MAX_FLOATS) s.floats.shift();
+      s.floats.push({ id: s.nextId++, x, y, text, color, life });
     };
 
     // --- Energy, score and hit-stop ----------------------------------------
@@ -960,14 +972,13 @@ export default function GameScreen({
         float(SCREEN.W / 2, SCREEN.H * 0.38, `CHAIN ×${callout}`, CHAIN_HUD_HOT);
         play('ding', 0.65);
       }
-      s.floats.push({
-        id: s.nextId++,
+      float(
         x,
-        y: y - 16,
-        text: mult > 1 ? `${gained} ×${mult}` : `${gained}`,
-        color: mult >= 5 ? CHAIN_HUD_HOT : CHAIN_HUD_COLOR,
-        life: 0.6,
-      });
+        y - 16,
+        mult > 1 ? `${gained} ×${mult}` : `${gained}`,
+        mult >= 5 ? CHAIN_HUD_HOT : CHAIN_HUD_COLOR,
+        0.6
+      );
     };
 
     // --- Taking a hit -------------------------------------------------------
@@ -1113,14 +1124,7 @@ export default function GameScreen({
       const bounty = bountyOf(c);
       if (bounty > 0) {
         s.coins += bounty;
-        s.floats.push({
-          id: s.nextId++,
-          x: ox,
-          y: oy - 18,
-          text: `+${bounty}`,
-          color: COIN_GOLD,
-          life: 0.6,
-        });
+        float(ox, oy - 18, `+${bounty}`, COIN_GOLD, 0.6);
       }
 
       if (c.elite) {
@@ -2452,8 +2456,8 @@ export default function GameScreen({
           ) : b.kind === 'talon' ? (
             // Raptor's claw: the ship's own bolt stretched long and thin (the
             // distortion is what makes it read as a claw rather than a bolt)
-            // and rotated onto its heading. The source points UP, so the
-            // rotation is the travel angle PLUS 90° — up is -90° in atan2 terms.
+            // and rotated onto its heading, which was CACHED at spawn — a claw
+            // flies straight, so recomputing it here was pure waste.
             <Image
               key={i}
               source={avatarShot.src}
@@ -2468,7 +2472,7 @@ export default function GameScreen({
                 transform: [
                   { translateX: b.x - TALON_THICK / 2 },
                   { translateY: b.y - TALON_LEN / 2 },
-                  { rotate: `${(Math.atan2(b.vy ?? 0, b.vx ?? 0) * 180) / Math.PI + 90}deg` },
+                  { rotate: `${b.angle ?? 0}deg` },
                 ],
               }}
             />
@@ -2493,9 +2497,7 @@ export default function GameScreen({
                 transform: [
                   { translateX: b.x - SPEAR_THICK / 2 },
                   { translateY: b.y - SPEAR_LEN },
-                  {
-                    rotate: `${(Math.atan2(b.vy ?? SPEAR_SPEED, b.vx ?? 0) * 180) / Math.PI + 90}deg`,
-                  },
+                  { rotate: `${b.angle ?? 180}deg` },
                 ],
               }}
             />
@@ -2900,6 +2902,12 @@ function fireTalonFan(s: GameState): void {
       vx: Math.cos(a) * TALON_SPEED,
       vy: Math.sin(a) * TALON_SPEED,
       hits: [],
+      // Cached so the render is a pure read. A claw flies a straight line, so
+      // its heading is fixed the moment it leaves — the render was recomputing
+      // this atan2 for every live claw on every frame, which at peak barrage
+      // was dozens of them sixty times a second. The source art points UP, so
+      // the sprite rotation is the travel angle plus 90°.
+      angle: (a * 180) / Math.PI + 90,
     });
   }
 }
@@ -2976,15 +2984,21 @@ function releaseCoins(s: GameState): void {
 function launchSpear(s: GameState, x: number): void {
   const tilt = (Math.random() - 0.5) * 2 * SPEAR_TILT;
   const speed = SPEAR_SPEED * (1 + (Math.random() - 0.5) * 2 * SPEAR_SPEED_VAR);
+  const vx = Math.sin(tilt) * speed;
+  const vy = Math.cos(tilt) * speed;
   s.bullets.push({
     id: s.nextId++,
     x,
     y: -20 - Math.random() * SPEAR_DROP_BAND, // tip; shaft trails above it
     dmg: SPEAR_DMG,
     kind: 'spear',
-    vx: Math.sin(tilt) * speed,
-    vy: Math.cos(tilt) * speed,
+    vx,
+    vy,
     hits: [],
+    // Cached for the same reason a talon's is: a spear falls on a fixed lean,
+    // so the render must not recompute this every frame for the whole rain.
+    // The art points UP and the spear falls DOWN, so a straight drop is 180°.
+    angle: (Math.atan2(vy, vx) * 180) / Math.PI + 90,
   });
 }
 

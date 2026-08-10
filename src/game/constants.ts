@@ -140,6 +140,25 @@ export const MAX_PARTICLES = 40;
  */
 export const MAX_ENEMY_BULLETS = 72;
 
+/**
+ * Hard ceiling on live floating score texts.
+ *
+ * Every float is a <Text>, which is the most expensive primitive in the
+ * renderer — it carries a layout and a text measurement that a coloured View
+ * does not. This pool was the last uncapped one, and unlike the others it fills
+ * from a SINGLE event: a Nova resolving a whole formation pays one float per
+ * kill on one frame, so a dozen text nodes could be created in the same frame
+ * that is already carrying the shockwave, the whiteout, a forced hit-stop and
+ * every death animation. That is why the Nova specifically stuttered.
+ *
+ * Unlike MAX_ENEMY_BULLETS this recycles the OLDEST rather than refusing the
+ * newest, which is the right way round here: floats are pure readout, the old
+ * one is already fading, and the number the player most wants is the one that
+ * just landed. Ten is past the point where they overlap into an unreadable
+ * stack anyway — the cap costs no information that was legible to begin with.
+ */
+export const MAX_FLOATS = 10;
+
 // --- Enemy death explosions ---------------------------------------------------
 // A 10-frame sprite animation per kill, in the colour family of the hull that
 // died — the same hue matching the enemy shots use, so a green ship fires green
@@ -1207,32 +1226,54 @@ export const PHANTOM_OFFSET = 48; // px each ghost flanks the hull
 export const PHANTOM_ALPHA = 0.45; // ghosts read as see-through, never as a second real ship
 export const PHANTOM_TINT = '#BFC9FF'; // pale spectral blue-white for the summon burst
 
-// Raptor — TALONS: a bird-of-prey rake, fired like a machine gun. A wide fan of
-// piercing claws goes out every TALON_BURST_EVERY for TALON_BURST_TIME, and the
-// whole fan swings slowly side to side as it fires, so the burst reads as a
-// rake being walked across the sky rather than one pattern stamped repeatedly.
-// Low damage per claw, enormous volume — the opposite of Nova's single hit.
-export const TALON_COUNT = 7; // claws per fan
+// Raptor — TALONS: a bird-of-prey rake. A fan of piercing claws goes out every
+// TALON_BURST_EVERY for TALON_BURST_TIME, and the whole fan swings side to side
+// as it fires, so the burst reads as a rake being walked across the sky rather
+// than one pattern stamped repeatedly.
+//
+// --- Rebalanced: fewer, heavier claws -------------------------------------
+//
+// This was 7 claws every 0.16s at 2 damage. A claw flies from the hull to the
+// top edge in about a second, so at that cadence the barrage peaked near FIFTY
+// live claw views at once — each a native view carrying a rotation — and it
+// measurably dropped frames on device. Volume was the ability's identity, but
+// fifty views is not something the renderer can absorb on top of a formation
+// that is itself shooting.
+//
+// The trade: roughly half the projectiles, more than double the damage each, so
+// the barrage hits at least as hard as it used to (56 claws × 5 = 280, against
+// 119 × 2 = 238) while costing the frame about half as much. Two changes keep
+// the RAKE intact rather than leaving a thin fan with holes in it:
+//
+//   - TALON_SWEEP_AMP is widened. Four claws across the same spread leave gaps
+//     twice as wide, so the fan now swings far enough that successive volleys
+//     interleave and fill them. Coverage is preserved over time instead of all
+//     at once, which is what a rake actually is.
+//   - TALON_THICK is up, so each claw covers more of the gap on its own.
+export const TALON_COUNT = 4; // claws per fan
 export const TALON_SPREAD = 1.3; // rad, total fan width
 // Quick claws: they clear the screen in about half a second, which both reads
 // as automatic fire and keeps the live count down (a slower claw lingers, and
 // lingering views are what cost frames).
 export const TALON_SPEED = 950; // px/s
-export const TALON_DMG = 2; // per claw — the barrage lands dozens of them
+export const TALON_DMG = 5; // per claw — heavier now that there are fewer
 export const TALON_BURST_TIME = 2.6; // s the barrage keeps firing
 // Cadence. Peak concurrency is set by this and the claw's flight time, NOT by
-// the burst length: at 0.16s it tops out near 30 live claw views, in the same
-// band as the game's heaviest existing gun (a stacked ×4 double). Dropping it
-// much lower stacks views faster than they clear and starts costing frames.
-export const TALON_BURST_EVERY = 0.16;
-export const TALON_SWEEP_AMP = 0.13; // rad the fan swings either side of centre
+// the burst length. At 4 claws every 0.2s the barrage tops out near TWENTY-FOUR
+// live claw views, down from ~49. Dropping this lower stacks views faster than
+// they clear and starts costing frames again — it multiplies against
+// TALON_COUNT, so it is the dominant lever. Guarded in constants.test.ts.
+export const TALON_BURST_EVERY = 0.2;
+// Widened with the claw count — see the rebalance note above. This is what
+// stops four claws reading as a thinner fan instead of the same rake.
+export const TALON_SWEEP_AMP = 0.22; // rad the fan swings either side of centre
 export const TALON_SWEEP_FREQ = 5.5; // rad/s of that swing
 // Talons/spears restyle the ship's own bolt rather than shipping new art:
 // stretched long and thin, they read as a claw and a lance instead of a bolt.
 // Drawn at a fixed length × thickness (NOT the source aspect) — the distortion
 // is the point.
 export const TALON_LEN = 78; // along travel
-export const TALON_THICK = 28;
+export const TALON_THICK = 34; // widened with the claw count — see above
 // A talon is a big raking claw, not a pinpoint bolt. Its hit test is padded so
 // a fast diagonal sweep can't step clean over a hitbox between two frames (at
 // the 0.05s dt cap a talon covers 38px, close to a 36px enemy box).
@@ -1276,24 +1317,39 @@ export const NOVA_CORE_R = 224; // expansion distance the core fades over
 // screen, one aimed at each enemy, piercing everything in their column. The
 // widest reach of any special — it covers the whole board, not just what's
 // ahead — but purely offensive, which is why it sits under the Nova.
-export const SPEAR_COUNT = 30; // spears in one rain
+//
+// --- Rebalanced: fewer, heavier spears --------------------------------------
+//
+// This was 30 spears at 8 damage. Unlike the talons, which clear the screen in
+// half a second, a spear falls the WHOLE height of the board — so the whole
+// rain is alive simultaneously and thirty views is the floor, not the peak. It
+// was the single most expensive moment in the game and it showed on device.
+//
+// Sixteen spears at 15 damage is exactly the same total (240), so the ability
+// hits precisely as hard as it always did against a stacked column — it just
+// costs the renderer 47% less. Coverage survives the cut because the spears
+// aimed at enemy COLUMNS are allocated first and the random scatter is only the
+// filler after them (see fireSpecial): at sixteen there is still a spear for
+// every distinct column on the board, which is the part that has to be
+// reliable. SPEAR_THICK is up to keep the curtain reading as dense.
+export const SPEAR_COUNT = 16; // spears in one rain
 export const SPEAR_SPEED = 940; // px/s downward, before the per-spear variance
-export const SPEAR_DMG = 8;
+export const SPEAR_DMG = 15; // heavier now that there are fewer
 export const SPEAR_LEN = 92; // stretched long — a lance, not a bolt
-export const SPEAR_THICK = 24;
+export const SPEAR_THICK = 30; // widened with the spear count — see above
 // The rain is deliberately MESSY: every spear rolls its own launch height, fall
 // speed and lean, so they arrive scattered instead of sweeping down as one tidy
 // rank of parallel rails. Only the spears aimed at enemy columns keep an exact
 // x — the rest scatter — so the chaos never costs the ability its reliability.
 export const SPEAR_DROP_BAND = 900; // px above the screen the launches scatter through
-// The rain launches in waves rather than as one sheet. Thirty spears is thirty
-// new sprites, and creating them all on the activation frame — which is already
-// carrying the hit-stop, two sounds and a heavy haptic — was the ability's whole
-// cost. Spread over a quarter-second it also reads better: a downpour building
-// instead of a single curtain. Every spear still launches from above the screen,
-// so nothing about the timing is visible as a delay.
-export const SPEAR_RELEASE = 5; // spears launched per release
-export const SPEAR_RELEASE_EVERY = 0.04; // s between releases → 30 in ~0.24s
+// The rain launches in waves rather than as one sheet. Creating every sprite on
+// the activation frame — which is already carrying the hit-stop, two sounds and
+// a heavy haptic — was a spike on top of a spike. Spread over a fifth of a
+// second it also reads better: a downpour building instead of a single curtain.
+// Every spear still launches from above the screen, so nothing about the timing
+// is visible as a delay.
+export const SPEAR_RELEASE = 4; // spears launched per release
+export const SPEAR_RELEASE_EVERY = 0.04; // s between releases → 16 in ~0.16s
 export const SPEAR_SPEED_VAR = 0.35; // ± fraction of random fall-speed variation
 // Radians of random lean off vertical. Small on purpose: at the 0.05s frame cap
 // the fastest spear already covers 63px against a 92px swept body, and a steeper

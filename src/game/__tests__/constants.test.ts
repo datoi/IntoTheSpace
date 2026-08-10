@@ -31,7 +31,15 @@ import {
   MAX_PARTICLES,
   MAX_EXPLOSIONS,
   MAX_ENEMY_BULLETS,
+  MAX_FLOATS,
   WAVE_MAX_ENEMIES,
+  TALON_COUNT,
+  TALON_DMG,
+  TALON_SPEED,
+  TALON_BURST_TIME,
+  TALON_BURST_EVERY,
+  SPEAR_COUNT,
+  SPEAR_DMG,
   QUALITY_DROP_FRAC,
   QUALITY_RAISE_FRAC,
   FRAME_BUDGET_MS,
@@ -237,6 +245,75 @@ describe('game data integrity', () => {
     expect(new Set(specials).size).toBe(specials.length);
   });
 
+});
+
+describe('special ability cost', () => {
+  // Raptor and Valkyrie were the two specials that measurably dropped frames on
+  // device, because both trade in VOLUME and every projectile is a native view
+  // carrying a rotation. They were rebalanced toward fewer, heavier hits. These
+  // guard the shape of that trade: the abilities must stay as strong as they
+  // were WITHOUT the view counts creeping back up.
+
+  const talonFans = Math.floor(TALON_BURST_TIME / TALON_BURST_EVERY) + 1;
+  const talonTotalDamage = talonFans * TALON_COUNT * TALON_DMG;
+  // A claw's whole life: fired from the hull, straight up, to the top edge.
+  // That is the LONGEST flight available — claws that fan sideways exit through
+  // a side sooner — so this over-estimates concurrency, which is the safe
+  // direction for a budget. Measured from AVATAR_Y, not SCREEN.H: the ship sits
+  // in the lower third, so a claw never crosses the whole board.
+  const talonFlightSec = AVATAR_Y / TALON_SPEED;
+  const peakTalons = TALON_COUNT * Math.ceil(talonFlightSec / TALON_BURST_EVERY);
+
+  it('keeps the talon barrage hitting at least as hard as it did at 7×2', () => {
+    // The pre-rebalance barrage was 17 fans × 7 claws × 2 damage = 238.
+    expect(talonTotalDamage).toBeGreaterThanOrEqual(238);
+  });
+
+  it('bounds peak live claws — the thing that actually cost frames', () => {
+    // On this model the barrage was 49 concurrent claw views at 7 every 0.16s,
+    // and is 24 at 4 every 0.2s. The ceiling leaves room to retune without
+    // letting it climb back toward what was dropping frames on device.
+    // TALON_BURST_EVERY is the dominant lever: lowering it stacks views faster
+    // than they clear, and it multiplies against TALON_COUNT.
+    expect(peakTalons).toBeLessThanOrEqual(28);
+  });
+
+  it('keeps the spear rain exactly as strong against a stacked column', () => {
+    // 30 × 8 before, 16 × 15 now. Spears pierce, so this is the damage a full
+    // column takes and it must not regress — the ability's whole identity is
+    // deleting a lane.
+    expect(SPEAR_COUNT * SPEAR_DMG).toBeGreaterThanOrEqual(240);
+  });
+
+  it('bounds the spear rain, which is ALL concurrent by construction', () => {
+    // Unlike claws, a spear falls the whole board, so the rain never partially
+    // clears — SPEAR_COUNT is the peak, not the total.
+    expect(SPEAR_COUNT).toBeLessThanOrEqual(20);
+  });
+
+  it('still fields a spear for every lane, so coverage never depends on luck', () => {
+    // Column-aimed spears are allocated before the random scatter, so as long
+    // as there are more spears than lanes the targeted part is intact.
+    expect(SPEAR_COUNT).toBeGreaterThan(LANES);
+  });
+
+  it('still reads as a fan and a rain rather than a pair of shots', () => {
+    expect(TALON_COUNT).toBeGreaterThanOrEqual(3);
+    expect(SPEAR_COUNT).toBeGreaterThanOrEqual(10);
+  });
+});
+
+describe('float ceiling', () => {
+  it('is small enough to bound a screen-clearing special', () => {
+    // A Nova can resolve a full formation on one frame, paying a <Text> per
+    // kill — the priciest view the renderer makes. The cap has to be under a
+    // formation, or it does not bind on the case it exists for.
+    expect(MAX_FLOATS).toBeLessThan(WAVE_MAX_ENEMIES);
+  });
+
+  it('is large enough that ordinary play never loses a readout', () => {
+    expect(MAX_FLOATS).toBeGreaterThanOrEqual(8);
+  });
 });
 
 describe('enemy shot ceiling', () => {
