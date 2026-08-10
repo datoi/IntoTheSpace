@@ -30,7 +30,8 @@ describe('initSounds failure handling', () => {
     await sounds.initSounds(); // fails silently, ready stays false
     expect(createAudioPlayer).not.toHaveBeenCalled();
     await sounds.initSounds(); // succeeds this time
-    expect(createAudioPlayer).toHaveBeenCalledTimes(9);
+    // Derived from the real sound board, so adding an effect doesn't fail here.
+    expect(createAudioPlayer).toHaveBeenCalledTimes(sounds.SOUND_NAMES.length);
     expect(() => sounds.play('ding')).not.toThrow();
   });
 

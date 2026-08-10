@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react-native';
 import ObstacleView from '../Obstacle';
+import { leftOf } from '../../test-utils/style';
 import { Card } from '../../game/types';
 import {
   ENEMY_SHIPS,
@@ -11,6 +12,7 @@ import {
   GUN_PICKUP_IMG,
   AVATARS,
   COIN_GOLD,
+  PALETTE,
 } from '../../game/constants';
 
 const baseCard: Card = {
@@ -63,12 +65,12 @@ describe('ObstacleView — enemies', () => {
 
   it('is positioned at its lane center when not charging', async () => {
     await render(<ObstacleView ob={{ ...baseCard, lane: 3 }} />);
-    expect(rootStyle().left).toBeCloseTo(laneX(3) - OB_VIS / 2);
+    expect(leftOf(rootStyle())).toBeCloseTo(laneX(3) - OB_VIS / 2);
   });
 
   it('follows its free position while charging', async () => {
     await render(<ObstacleView ob={{ ...baseCard, charging: true, cx: 42 }} />);
-    expect(rootStyle().left).toBeCloseTo(42 - OB_VIS / 2);
+    expect(leftOf(rootStyle())).toBeCloseTo(42 - OB_VIS / 2);
   });
 });
 
@@ -122,9 +124,14 @@ describe('ObstacleView — bosses', () => {
 });
 
 describe('ObstacleView — pickups and death animation', () => {
-  it('renders the heart emoji for a heart pickup', async () => {
-    await render(<ObstacleView ob={{ ...baseCard, kind: 'heart', emoji: '❤️' }} />);
-    expect(screen.getByText('❤️')).toBeTruthy();
+  it('draws a heart pickup rather than relying on an emoji', async () => {
+    // makeCard spawns hearts with `emoji: ''`, so the emoji path rendered a glow
+    // ring around nothing — the one drop you could not identify by looking at
+    // it. It carries the drawn health glyph now, so an empty emoji is harmless.
+    await render(<ObstacleView ob={{ ...baseCard, kind: 'heart', emoji: '' }} />);
+    expect(findImages()).toHaveLength(0); // drawn, not a sprite
+    const json = JSON.stringify(screen.toJSON());
+    expect(json).toContain(PALETTE.vital);
   });
 
   it('draws a coin pickup rather than relying on an emoji', async () => {

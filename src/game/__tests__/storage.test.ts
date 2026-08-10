@@ -1,13 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadSave, writeSave, loadRun, saveRun, clearRun, DEFAULT_SAVE, SaveData } from '../storage';
 import { GameState } from '../types';
+import { freshRunState } from '../runstate';
 
 const SAVE_KEY = 'doomscroll:save:v1';
 // Must match storage.ts — if the versioned key there moves again, the
 // corrupt-JSON and clearRun tests below silently stop testing anything.
 const RUN_KEY = 'doomscroll:run:v4';
 
+// Built on DEFAULT_SAVE so a field added to the schema doesn't break this
+// fixture — the test cares about round-tripping, not about listing every key.
 const sampleSave: SaveData = {
+  ...DEFAULT_SAVE,
   best: 1234,
   likes: 42,
   unlocked: ['ironclad', 'specter'],
@@ -17,38 +21,9 @@ const sampleSave: SaveData = {
 };
 
 // Minimal-but-complete run state; only fields storage cares about are shape-level.
-const sampleRun = {
-  avatarX: 100,
-  avatarY: 500,
-  targetX: 100,
-  targetY: 500,
-  dragDX: 0,
-  dragDY: 0,
-  dragging: false,
-  alt: 999,
-  wave: 3,
-  waveClearTimer: 1,
-  gun: 'single',
-  gunTime: 0,
-  gunLevel: 1,
-  fireTimer: 0,
-  giftTimer: 5,
-  heartTimer: 10,
-  coinTimer: 4,
-  enemyFireTimer: 1,
-  bullets: [],
-  enemyBullets: [],
-  cards: [],
-  particles: [],
-  floats: [],
-  elapsed: 12,
-  distTimer: 0,
-  hearts: 2,
-  coins: 9,
-  shake: 0,
-  hitFlash: 0,
-  nextId: 50,
-} as GameState;
+// Same idea for the run snapshot: freshRunState() is the canonical shape, and
+// only the handful of fields these tests assert on are overridden.
+const sampleRun: GameState = { ...freshRunState(), alt: 999, wave: 3, hearts: 2, coins: 7 };
 
 beforeEach(async () => {
   await AsyncStorage.clear();
@@ -162,7 +137,7 @@ describe('run snapshots', () => {
           size: 11,
           phase: 0.5,
           life: 3,
-          shipIdx: 0,
+          shot: 0,
         },
       ],
     };

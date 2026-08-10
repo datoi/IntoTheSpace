@@ -12,6 +12,10 @@ import {
   SHOT_LASER_IMG,
   ENEMY_SHOTS,
   ENEMY_SHOT_ASPECT,
+  EXPLOSIONS,
+  EXPLOSION_VIS,
+  EXPLOSION_BOSS,
+  EXPLOSION_BOSS_SCALE,
   PLAYER_SHOT_LEN,
   ENEMY_BULLET_SIZE,
   ENEMY_BULLET_ART_SCALE,
@@ -59,6 +63,25 @@ export const PRELOAD_SPRITES: PreloadSprite[] = [
     const w = ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE;
     return { src, w, h: w / ENEMY_SHOT_ASPECT[i] };
   }),
+  // Every explosion frame. A death animation steps ten sources in under half a
+  // second, so a cold decode part-way through would drop frames out of the
+  // middle of the burst — the one place a gap is most visible. Warmed at their
+  // DRAWN size (92px), not the 192px source, so all sixty cost a few MB.
+  ...EXPLOSIONS.flat().map((src) => ({ src, w: EXPLOSION_VIS, h: EXPLOSION_VIS })),
+  // …and the boss style AGAIN at the size a boss actually draws it.
+  //
+  // A bitmap warmed at one size decodes again at another, and a boss fireball
+  // is EXPLOSION_BOSS_SCALE× the ordinary one — so every frame of the biggest
+  // explosion in the game was decoding cold despite the line above, ten of them
+  // inside half a second, on the frame a boss dies. That frame is already
+  // carrying the payout fan, the debris burst and a forced hit-stop; the decode
+  // was landing on top of the worst of it. Only the one style a boss uses needs
+  // this, so it costs ten bitmaps rather than sixty.
+  ...EXPLOSIONS[EXPLOSION_BOSS].map((src) => ({
+    src,
+    w: EXPLOSION_VIS * EXPLOSION_BOSS_SCALE,
+    h: EXPLOSION_VIS * EXPLOSION_BOSS_SCALE,
+  })),
 ];
 
 // Every module the run can reach, backgrounds included. Downloading only puts
@@ -68,6 +91,7 @@ export const PRELOAD_SPRITES: PreloadSprite[] = [
 const bgModules = BG_SETS.flatMap((set) => [
   ...(set.base !== undefined ? [set.base] : []),
   ...set.layers.map((l) => l.src),
+  ...(set.planet ? set.planet.items.map((it) => it.src) : []),
 ]);
 
 export const PRELOAD_MODULES: number[] = [

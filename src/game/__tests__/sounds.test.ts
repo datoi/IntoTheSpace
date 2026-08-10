@@ -1,5 +1,5 @@
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
-import { initSounds, play, playPop } from '../sounds';
+import { initSounds, play, playPop, playShot, SOUND_NAMES } from '../sounds';
 
 const mockCreate = createAudioPlayer as jest.Mock;
 const mockSetMode = setAudioModeAsync as jest.Mock;
@@ -11,14 +11,14 @@ describe('initSounds', () => {
   it('configures silent-mode playback and creates one player per effect', async () => {
     await initSounds();
     expect(mockSetMode).toHaveBeenCalledWith({ playsInSilentMode: true });
-    // 5 combo pops + buzz, ding, whoosh, gameover
-    expect(mockCreate).toHaveBeenCalledTimes(9);
+    // Derived from the real sound board, so adding an effect doesn't fail here.
+    expect(mockCreate).toHaveBeenCalledTimes(SOUND_NAMES.length);
   });
 
   it('is idempotent — a second init creates no extra players', async () => {
     await initSounds();
     await initSounds();
-    expect(mockCreate).toHaveBeenCalledTimes(9);
+    expect(mockCreate).toHaveBeenCalledTimes(SOUND_NAMES.length);
   });
 });
 
@@ -82,5 +82,54 @@ describe('playPop', () => {
   it('plays pops at 0.9 volume', () => {
     playPop(2);
     expect(popPlayer(2).volume).toBe(0.9);
+  });
+});
+
+describe('playShot', () => {
+  beforeAll(() => initSounds());
+
+  // Voices sit at the end of the board, after the 9 original effects.
+  const voice = (name: string) =>
+    mockCreate.mock.results[SOUND_NAMES.indexOf(name as never)].value;
+
+  // The throttle is wall-clock based, so drive it from a clock we control.
+  // Must be a standalone counter, not `Date.now() + n` — by the second test
+  // Date.now is already spied and would just re-read the frozen value.
+  let clock = 1_000_000;
+  const realNow = Date.now;
+
+  beforeEach(() => {
+    for (const n of ['shot', 'shot_laser', 'shot_bomb']) voice(n).play.mockClear();
+    clock += 10_000; // well past SHOT_MIN_GAP_MS, so each test starts unthrottled
+    jest.spyOn(Date, 'now').mockImplementation(() => clock);
+  });
+
+  afterEach(() => {
+    Date.now = realNow;
+  });
+
+  it('gives the laser and the bomb their own voice', () => {
+    playShot('laser');
+    expect(voice('shot_laser').play).toHaveBeenCalledTimes(1);
+    expect(voice('shot').play).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the default bolt for every other gun', () => {
+    // 'single', 'double' and 'homing' all fire the same bolt — only the two
+    // guns with a genuinely different shape get their own sample.
+    playShot('double');
+    expect(voice('shot').play).toHaveBeenCalledTimes(1);
+  });
+
+  it('is audible — the placeholder played at 0.1 and could not be heard', () => {
+    playShot('single');
+    expect(voice('shot').volume).toBeGreaterThan(0.25);
+  });
+
+  it('throttles a sustained stream so a stacked gun cannot rattle', () => {
+    playShot('single');
+    playShot('single');
+    playShot('single');
+    expect(voice('shot').play).toHaveBeenCalledTimes(1);
   });
 });

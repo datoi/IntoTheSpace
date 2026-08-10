@@ -1,10 +1,17 @@
 import React from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
 import { Card } from '../game/types';
+import { BOONS } from '../game/pickups';
+import { eliteColor } from '../game/enemies';
 import {
   laneX,
   OB_EMOJI,
   OB_VIS,
+  BOON_VIS,
+  BOON_EMOJI,
+  ELITE_AURA_SCALE,
+  ELITE_AURA_ALPHA,
+  WINDUP_RING,
   ENEMY_SHIP_VIS,
   ENEMY_SHIPS,
   GUN_PICKUP_IMG,
@@ -16,14 +23,19 @@ import {
   BOSS_MINI_VIS,
   BOSS_GIANT_VIS,
   COIN_VIS,
+  HEART_ICON,
   PALETTE,
 } from '../game/constants';
 import CoinIcon from './Coin';
+import Icon from './Icon';
 
 const GLOW: Record<string, string> = {
-  rage: PALETTE.rage,
-  heart: PALETTE.moment,
-  gift: PALETTE.bell,
+  rage: PALETTE.threat, // enemy
+  // Health red, matching the ❤️ it sits behind and the guide's Heart row. This
+  // is `vital`, NOT `threat` — the rule is still that no pickup wears the
+  // hostile crimson, it is only that health now has a red of its own.
+  heart: PALETTE.vital,
+  gift: PALETTE.gold,
 };
 
 // Instantly readable obstacles — no text to parse at game speed.
@@ -38,15 +50,63 @@ function ObstacleView({ ob, avatarShot }: { ob: Card; avatarShot?: ShotArt }) {
   const cy = ob.y + ob.h / 2;
   // A gun drop wears the art of the gun it grants. The 'double' drop instead
   // shows two of the avatar's own shots (what it actually doubles up on).
+  const eliteTint = ob.kind === 'rage' && !ob.dead ? eliteColor(ob) : undefined;
   const isDoubleGift = ob.kind === 'gift' && ob.gun === 'double' && avatarShot != null;
   const gunImg = ob.kind === 'gift' && ob.gun && !isDoubleGift ? GUN_PICKUP_IMG[ob.gun] : undefined;
-  const dShotThick = avatarShot ? GIFT_SHOT_LEN / avatarShot.aspect : 0;
+  const dShotThick = avatarShot ? GIFT_SHOT_LEN * avatarShot.aspect : 0;
   const showHp = ob.maxHp > 1 && !ob.dead;
+  // A Shielded elite shows its shield pool INSTEAD of its hull bar while the
+  // shield holds — two stacked bars read as noise, and the shield is the one
+  // the player needs to break first.
+  const shieldUp = (ob.shieldHp ?? 0) > 0 && (ob.shieldMax ?? 0) > 0;
   const hpBar = showHp && (
     <View style={styles.hpTrack}>
-      <View style={[styles.hpFill, { width: `${(Math.max(0, ob.hp) / ob.maxHp) * 100}%` }]} />
+      <View
+        style={[
+          shieldUp ? styles.shieldFill : styles.hpFill,
+          {
+            width: shieldUp
+              ? `${(Math.max(0, ob.shieldHp!) / ob.shieldMax!) * 100}%`
+              : `${(Math.max(0, ob.hp) / ob.maxHp) * 100}%`,
+          },
+        ]}
+      />
     </View>
   );
+
+  // --- Utility pickup: a tinted badge carrying the boon's own glyph ---
+  // Rendered as a drawn badge rather than a sprite: the art pack only offers
+  // three letter glyphs (P/S/U), which cannot distinguish fourteen boons, and an
+  // emoji badge is both instantly readable and free of bundle weight.
+  if (ob.kind === 'boon' && ob.boon) {
+    const def = BOONS[ob.boon];
+    return (
+      <View
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          width: BOON_VIS,
+          height: BOON_VIS,
+          opacity,
+          transform: [
+            { translateX: cx - BOON_VIS / 2 },
+            { translateY: cy - BOON_VIS / 2 },
+            { scale },
+          ],
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        pointerEvents="none"
+      >
+        <View style={[styles.boonGlow, { backgroundColor: def.color }]} />
+        <View style={[styles.boonBadge, { borderColor: def.color }]}>
+          <Icon name={def.icon} size={BOON_EMOJI} color={def.color} filled />
+        </View>
+      </View>
+    );
+  }
+
 
   if (ob.kind === 'rage' && ob.boss) {
     // Boss: one big monster, rendered well above the (forgiving) hitbox.
@@ -55,12 +115,16 @@ function ObstacleView({ ob, avatarShot }: { ob: Card; avatarShot?: ShotArt }) {
       <View
         style={{
           position: 'absolute',
-          left: cx - vis / 2,
-          top: cy - vis / 2,
+          left: 0,
+          top: 0,
           width: vis,
           height: vis,
           opacity,
-          transform: [{ scale }],
+          transform: [
+            { translateX: cx - vis / 2 },
+            { translateY: cy - vis / 2 },
+            { scale },
+          ],
         }}
         pointerEvents="none"
       >
@@ -80,10 +144,12 @@ function ObstacleView({ ob, avatarShot }: { ob: Card; avatarShot?: ShotArt }) {
       style={[
         styles.emojiWrap,
         {
-          left: cx - OB_VIS / 2,
-          top: cy - OB_VIS / 2,
           opacity,
-          transform: [{ scale }],
+          transform: [
+            { translateX: cx - OB_VIS / 2 },
+            { translateY: cy - OB_VIS / 2 },
+            { scale },
+          ],
         },
       ]}
       pointerEvents="none"
@@ -98,16 +164,41 @@ function ObstacleView({ ob, avatarShot }: { ob: Card; avatarShot?: ShotArt }) {
         </>
       )}
       {ob.kind === 'rage' ? (
-        <Image
-          source={ENEMY_SHIPS[Math.min(ob.shipIdx ?? 0, ENEMY_SHIPS.length - 1)]}
-          style={styles.enemyShip}
-          resizeMode="contain"
-          fadeDuration={0}
-        />
+        <>
+          {/* Elite aura: a tinted halo naming the modifier by colour, so an
+              elite is spotted before it does anything. */}
+          {eliteTint && (
+            <View
+              style={[
+                styles.eliteAura,
+                {
+                  backgroundColor: eliteTint,
+                  width: OB_VIS * ELITE_AURA_SCALE,
+                  height: OB_VIS * ELITE_AURA_SCALE,
+                  borderRadius: (OB_VIS * ELITE_AURA_SCALE) / 2,
+                },
+              ]}
+            />
+          )}
+          {/* A sniper's charge, drawn as a tightening bright ring. The fast shot
+              that follows is only fair because this telegraphs it. */}
+          {(ob.windup ?? 0) > 0 && <View style={styles.windupRing} />}
+          {/* A teleporter's arrival flash. */}
+          {(ob.blinkFlash ?? 0) > 0 && (
+            <View style={[styles.blinkFlash, { opacity: (ob.blinkFlash ?? 0) / 0.22 }]} />
+          )}
+          <Image
+            source={ENEMY_SHIPS[Math.min(ob.shipIdx ?? 0, ENEMY_SHIPS.length - 1)]}
+            style={styles.enemyShip}
+            resizeMode="contain"
+            fadeDuration={0}
+          />
+        </>
       ) : ob.kind === 'coin' ? (
         <CoinIcon size={COIN_VIS} />
       ) : isDoubleGift && avatarShot ? (
-        // Two of the avatar's own shots, rotated to point up like they fire.
+        // Two of the avatar's own shots. The art already points up, which is
+        // the way they fire, so neither needs rotating.
         <View style={styles.doubleGift}>
           {[-10, 10].map((dx, k) => (
             <Image
@@ -117,25 +208,26 @@ function ObstacleView({ ob, avatarShot }: { ob: Card; avatarShot?: ShotArt }) {
               fadeDuration={0}
               style={{
                 position: 'absolute',
-                left: OB_VIS / 2 - GIFT_SHOT_LEN / 2 + dx,
-                top: OB_VIS / 2 - dShotThick / 2,
-                width: GIFT_SHOT_LEN,
-                height: dShotThick,
-                transform: [{ rotate: '-90deg' }],
+                left: OB_VIS / 2 - dShotThick / 2 + dx,
+                top: OB_VIS / 2 - GIFT_SHOT_LEN / 2,
+                width: dShotThick,
+                height: GIFT_SHOT_LEN,
               }}
             />
           ))}
         </View>
       ) : gunImg ? (
-        // The bomb's blast-cloud art streaks sideways in the source; rotate the
-        // falling pickup so it points up like it fires. Laser/homing sprites
-        // already read fine at their native angle.
+        // Gun-shot art points +x in the source; rotate the falling pickup so it
+        // points up, like the shot it grants (the symmetric bomb blast is
+        // unaffected by the rotation).
         <Image
           source={gunImg}
-          style={[styles.giftIcon, ob.gun === 'bomb' && { transform: [{ rotate: '-90deg' }] }]}
+          style={[styles.giftIcon, { transform: [{ rotate: '-90deg' }] }]}
           resizeMode="contain"
           fadeDuration={0}
         />
+      ) : ob.kind === 'heart' ? (
+        <Icon name="hull" size={HEART_ICON} color={PALETTE.vital} filled />
       ) : (
         <Text style={styles.emoji}>{ob.emoji}</Text>
       )}
@@ -164,11 +256,61 @@ const styles = StyleSheet.create({
   hpFill: {
     height: '100%',
     borderRadius: 2,
-    backgroundColor: PALETTE.rage,
+    backgroundColor: PALETTE.threat,
+  },
+  shieldFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: PALETTE.threatDeep, // an ENEMY's shield pool
+  },
+  // --- Elite / archetype tells ---
+  eliteAura: {
+    position: 'absolute',
+    opacity: ELITE_AURA_ALPHA,
+  },
+  windupRing: {
+    position: 'absolute',
+    width: WINDUP_RING,
+    height: WINDUP_RING,
+    borderRadius: WINDUP_RING / 2,
+    borderWidth: 2.5,
+    borderColor: PALETTE.threat, // a sniper winding up is a threat, not a reward
+    opacity: 0.9,
+  },
+  blinkFlash: {
+    position: 'absolute',
+    width: OB_VIS,
+    height: OB_VIS,
+    borderRadius: OB_VIS / 2,
+    backgroundColor: PALETTE.threat, // a teleporter arriving
+  },
+  // --- Utility pickup badge ---
+  boonGlow: {
+    position: 'absolute',
+    width: BOON_VIS,
+    height: BOON_VIS,
+    borderRadius: BOON_VIS / 2,
+    opacity: 0.3,
+  },
+  boonBadge: {
+    width: BOON_VIS - 8,
+    height: BOON_VIS - 8,
+    borderRadius: (BOON_VIS - 8) / 2,
+    borderWidth: 2.5,
+    backgroundColor: 'rgba(8,10,18,0.82)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  boonEmoji: {
+    fontSize: BOON_EMOJI,
   },
   // --- Emoji obstacles (rage / moment / gift) ---
+  // Parked at the origin and moved by translate: obstacles move every frame, and
+  // left/top would re-run layout on this whole subtree each time.
   emojiWrap: {
     position: 'absolute',
+    left: 0,
+    top: 0,
     width: OB_VIS,
     height: OB_VIS,
     alignItems: 'center',

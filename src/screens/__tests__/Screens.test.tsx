@@ -1,39 +1,38 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react-native';
 import { MenuScreen, GameOverScreen, ShopScreen } from '../Screens';
-import { SaveData } from '../../game/storage';
+import { SaveData, DEFAULT_SAVE } from '../../game/storage';
 import { RunResult } from '../../game/types';
 import { AVATARS } from '../../game/constants';
 
-const freshSave: SaveData = {
-  best: 0,
-  likes: 0,
-  unlocked: ['ironclad'],
-  selectedAvatar: 'ironclad',
-  unlockedBackgrounds: ['violet'],
-  selectedBackground: 'violet',
-};
+const freshSave: SaveData = { ...DEFAULT_SAVE };
 
 describe('MenuScreen', () => {
   it('renders the title and coins but hides BEST before the first run', async () => {
-    await render(<MenuScreen save={{ ...freshSave, likes: 40 }} onStart={jest.fn()} onShop={jest.fn()} />);
+    await render(<MenuScreen save={{ ...freshSave, likes: 40 }} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
     expect(screen.getByText('SPACE')).toBeTruthy();
     expect(screen.queryByText(/BEST/)).toBeNull();
     expect(screen.getByText('40')).toBeTruthy();
   });
 
-  it('shows best distance and coins once a run is banked', async () => {
-    const save = { ...freshSave, best: 800, likes: 25 };
-    await render(<MenuScreen save={save} onStart={jest.fn()} onShop={jest.fn()} />);
-    expect(screen.getByText(/BEST 800m/)).toBeTruthy();
+  it('leads with the best SCORE, and keeps best depth beside it', async () => {
+    const save = {
+      ...freshSave,
+      best: 800,
+      likes: 25,
+      stats: { ...freshSave.stats, bestScore: 4200 },
+    };
+    await render(<MenuScreen save={save} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
+    expect(screen.getByText('BEST')).toBeTruthy();
+    expect(screen.getByText('4,200')).toBeTruthy();
     expect(screen.getByText('25')).toBeTruthy();
   });
 
   it('starts the game and opens the shop', async () => {
     const onStart = jest.fn();
     const onShop = jest.fn();
-    await render(<MenuScreen save={freshSave} onStart={onStart} onShop={onShop} />);
-    await fireEvent.press(screen.getByText('LIFT OFF 🚀'));
+    await render(<MenuScreen save={freshSave} onStart={onStart} onShop={onShop} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
+    await fireEvent.press(screen.getByText('LIFT OFF'));
     expect(onStart).toHaveBeenCalledTimes(1);
     await fireEvent.press(screen.getByText('SHOP'));
     expect(onShop).toHaveBeenCalledTimes(1);
@@ -42,20 +41,39 @@ describe('MenuScreen', () => {
   it('falls back to the first avatar when the selected id is unknown', async () => {
     const save = { ...freshSave, selectedAvatar: 'deleted-avatar' };
     await expect(
-      render(<MenuScreen save={save} onStart={jest.fn()} onShop={jest.fn()} />)
+      render(<MenuScreen save={save} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />)
     ).resolves.toBeTruthy();
   });
 });
 
 describe('GameOverScreen', () => {
-  const result: RunResult = { coins: 3, altitude: 1450 };
+  const result: RunResult = { coins: 3, score: 9800, bestMult: 4, grazes: 31, altitude: 1450, crystals: 0, chips: 0, alloy: 0, wave: 7, stats: {} };
 
-  it('shows the run distance', async () => {
+  it('headlines the score and shows the best score beneath it', async () => {
+    await render(
+      <GameOverScreen
+        result={result}
+        best={2000}
+        bestScore={15000}
+        isNewBest={false}
+        onRestart={jest.fn()}
+        onMenu={jest.fn()}
+      />
+    );
+    expect(screen.getByText('SCORE')).toBeTruthy();
+    expect(screen.getByText('9,800')).toBeTruthy();
+    expect(screen.getByText(/BEST 15,000/)).toBeTruthy();
+  });
+
+  it('breaks the score down so the player learns where it came from', async () => {
     await render(
       <GameOverScreen result={result} best={2000} isNewBest={false} onRestart={jest.fn()} onMenu={jest.fn()} />
     );
-    expect(screen.getByText('1450m')).toBeTruthy();
-    expect(screen.getByText(/BEST 2000m/)).toBeTruthy();
+    expect(screen.getByText('×4')).toBeTruthy(); // best chain
+    expect(screen.getByText('31')).toBeTruthy(); // grazes
+    expect(screen.getByText('7')).toBeTruthy(); // wave reached
+    // Altitude survives as depth, not as the score.
+    expect(screen.getByText(/1450m/)).toBeTruthy();
   });
 
   it('reports the coins the run banked', async () => {
@@ -66,28 +84,26 @@ describe('GameOverScreen', () => {
   });
 
   it('shows a zeroed run without hiding the coin line', async () => {
-    const blank: RunResult = { coins: 0, altitude: 0 };
+    const blank: RunResult = { coins: 0, score: 0, bestMult: 1, grazes: 0, altitude: 0, crystals: 0, chips: 0, alloy: 0, wave: 0, stats: {} };
     await render(
       <GameOverScreen result={blank} best={0} isNewBest={false} onRestart={jest.fn()} onMenu={jest.fn()} />
     );
     expect(screen.getByText('+0 COLLECTED')).toBeTruthy();
   });
 
-  it('no longer reports a score — distance is the only one', async () => {
-    await render(
-      <GameOverScreen result={result} best={2000} isNewBest={false} onRestart={jest.fn()} onMenu={jest.fn()} />
-    );
-    expect(screen.queryByText(/SCORE/)).toBeNull();
-    expect(screen.queryByText(/COMBO/)).toBeNull();
-    expect(screen.getByText('1450m')).toBeTruthy();
-  });
-
   it('celebrates a new best instead of showing the old one', async () => {
     await render(
-      <GameOverScreen result={result} best={1450} isNewBest onRestart={jest.fn()} onMenu={jest.fn()} />
+      <GameOverScreen
+        result={result}
+        best={1450}
+        bestScore={9800}
+        isNewBest
+        onRestart={jest.fn()}
+        onMenu={jest.fn()}
+      />
     );
     expect(screen.getByText('NEW BEST')).toBeTruthy();
-    expect(screen.queryByText(/BEST 1450m/)).toBeNull();
+    expect(screen.queryByText(/BEST 9,800/)).toBeNull();
   });
 
   it('restarts and returns to menu', async () => {
@@ -98,19 +114,18 @@ describe('GameOverScreen', () => {
     );
     await fireEvent.press(screen.getByText('LAUNCH AGAIN'));
     expect(onRestart).toHaveBeenCalledTimes(1);
-    await fireEvent.press(screen.getByText('Back to menu'));
+    await fireEvent.press(screen.getByText('BACK TO MENU'));
     expect(onMenu).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('ShopScreen', () => {
   const richSave: SaveData = {
+    ...DEFAULT_SAVE,
     best: 100,
     likes: 200,
     unlocked: ['ironclad', 'specter'],
     selectedAvatar: 'specter',
-    unlockedBackgrounds: ['violet'],
-    selectedBackground: 'violet',
   };
 
   const renderShop = async (save: SaveData) => {
@@ -136,7 +151,7 @@ describe('ShopScreen', () => {
     await renderShop(richSave);
     for (const a of AVATARS) expect(screen.getByText(a.name)).toBeTruthy();
     expect(screen.getByText('EQUIPPED')).toBeTruthy(); // specter
-    expect(screen.getByText('Tap to equip')).toBeTruthy(); // ironclad
+    expect(screen.getByText('OWNED')).toBeTruthy(); // ironclad
     expect(screen.getByText('150')).toBeTruthy(); // raptor price
   });
 
@@ -164,7 +179,7 @@ describe('ShopScreen', () => {
     await fireEvent.press(screen.getByText('Valkyrie'));
     expect(onBuy).not.toHaveBeenCalled();
     expect(onSelect).not.toHaveBeenCalled();
-    expect(screen.getAllByText('🔒').length).toBeGreaterThan(0);
+    expect(screen.getByText('Valkyrie')).toBeTruthy(); // still listed, just locked
   });
 
   it('affordability is inclusive: exact coin balance can buy', async () => {
@@ -206,28 +221,29 @@ describe('ShopScreen', () => {
 
 describe('PickupGuide (menu overlay)', () => {
   const openGuide = async () => {
-    await render(<MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} />);
-    await fireEvent.press(screen.getByText('❔ WHAT DO THE PICK-UPS DO?'));
+    await render(<MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
+    await fireEvent.press(screen.getAllByText('PICK-UPS')[0]);
   };
 
   it('opens from the menu link and lists every pick-up', async () => {
     await openGuide();
-    expect(screen.getByText('PICK-UPS')).toBeTruthy();
-    for (const name of ['🔫 Double Fire', '💣 Bombs', '🔴 Laser', '🚀 Homing', 'Heart', 'Coin']) {
+    expect(screen.getAllByText('PICK-UPS').length).toBeGreaterThan(1);
+    // Names lost their emoji prefix — the row now carries a tinted icon instead.
+    for (const name of ['Double Fire', 'Bombs', 'Laser', 'Homing', 'Heart', 'Coin']) {
       expect(screen.getByText(name)).toBeTruthy();
     }
     expect(screen.getByText(/Gun pick-ups last a short while/)).toBeTruthy();
   });
 
   it('is hidden until requested', async () => {
-    await render(<MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} />);
-    expect(screen.queryByText('PICK-UPS')).toBeNull();
+    await render(<MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
+    expect(screen.getAllByText('PICK-UPS').length).toBe(1);
   });
 
   it('GOT IT closes the overlay and returns to the menu', async () => {
     await openGuide();
     await fireEvent.press(screen.getByText('GOT IT'));
-    expect(screen.queryByText('PICK-UPS')).toBeNull();
-    expect(screen.getByText('LIFT OFF 🚀')).toBeTruthy();
+    expect(screen.getAllByText('PICK-UPS').length).toBe(1);
+    expect(screen.getByText('LIFT OFF')).toBeTruthy();
   });
 });

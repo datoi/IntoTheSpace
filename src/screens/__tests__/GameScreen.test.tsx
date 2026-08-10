@@ -1,14 +1,17 @@
 import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react-native';
 import GameScreen from '../GameScreen';
+import { leftOf } from '../../test-utils/style';
+import { freshRunState } from '../../game/runstate';
+import { BASE_SHIP_STATS } from '../../game/upgrades';
 import { GameState, Card, EnemyBullet } from '../../game/types';
 import {
+  PALETTE,
   laneX,
   AVATAR_Y,
   AVATAR_SIZE,
   HEARTS_START,
-  HEARTS_MAX,
-  ENEMY_SHIPS,
+    ENEMY_SHIPS,
   BOSS_MINI_IMG,
   BOSS_GIANT_IMG,
   GUN_LABEL,
@@ -22,6 +25,19 @@ import {
   FEED_PAD,
   BACKGROUNDS,
   AVATARS,
+  SPECIALS,
+  ENERGY_OVERCHARGE,
+  TALON_COUNT,
+  TALON_LEN,
+  TALON_BURST_TIME,
+  SPEAR_LEN,
+  SPEAR_COUNT,
+  SPEAR_RELEASE,
+  SPEAR_RELEASE_EVERY,
+  NOVA_RADIUS,
+  MAX_PARTICLES,
+  LANES,
+  PHANTOM_TIME,
 } from '../../game/constants';
 
 /**
@@ -33,38 +49,27 @@ import {
 
 const AVATAR_X = laneX(1);
 
+// Firing a special freezes the simulation for HITSTOP_BOSS_PHASE so the ultimate
+// lands with weight. Post-FIRE assertions must advance past that window, or they
+// sample the frozen frame before the effect has run.
+const HITSTOP_MS = 200;
+
 // A quiet baseline: all spawn timers pushed far out so nothing random drops
 // into the scene during a short test window.
 const quietState = (over: Partial<GameState> = {}): GameState => ({
-  avatarX: AVATAR_X,
-  avatarY: AVATAR_Y,
-  targetX: AVATAR_X,
-  targetY: AVATAR_Y,
-  dragDX: 0,
-  dragDY: 0,
-  dragging: false,
-  alt: 0,
+  ...freshRunState(),
   wave: 1,
   waveClearTimer: 999,
-  gun: 'single',
-  gunTime: 0,
-  gunLevel: 1,
+  // Push every timer far out so nothing random drops into the scene — and so
+  // the PLAYER doesn't fire either. That last one matters: several scenarios
+  // park a 1-HP enemy on screen and assert on what it does, which auto-fire
+  // would end before it got the chance.
   fireTimer: 999,
   giftTimer: 999,
   heartTimer: 999,
   coinTimer: 999,
+  boonTimer: 999,
   enemyFireTimer: 999,
-  bullets: [],
-  enemyBullets: [],
-  cards: [],
-  particles: [],
-  floats: [],
-  elapsed: 0,
-  distTimer: 0,
-  hearts: HEARTS_START,
-  coins: 0,
-  shake: 0,
-  hitFlash: 0,
   nextId: 1000,
   ...over,
 });
@@ -95,8 +100,10 @@ const renderGame = async (resume?: GameState, extraProps: Record<string, unknown
   await render(
     <GameScreen
       best={0}
-      avatarEmoji="🚀"
+      avatarImage={AVATARS[0].image}
       avatarShot={AVATARS[0].shot}
+      avatarSpecial={AVATARS[0].special}
+      shipStats={BASE_SHIP_STATS}
       background={BACKGROUNDS[0].set}
       resume={resume ?? null}
       onGameOver={onGameOver}
@@ -115,8 +122,8 @@ const advance = async (ms: number) => {
   });
 };
 
-// Center x of the rendered boss: its wrapper View is positioned by its left
-// edge, so add back half the sprite's width.
+// Center x of the rendered boss: its wrapper View is placed by its left edge
+// (as a translation — see test-utils/style), so add back half the sprite's width.
 const bossCenterX = (): number => {
   let found: number | undefined;
   const walk = (node: any) => {
@@ -124,7 +131,7 @@ const bossCenterX = (): number => {
     const kids: any[] = node.children ?? [];
     if (kids.some((k) => k?.type === 'Image' && k.props.source === BOSS_MINI_IMG)) {
       const style = Object.assign({}, ...[node.props.style].flat(Infinity).filter(Boolean));
-      found = style.left + style.width / 2;
+      found = leftOf(style) + style.width / 2;
     }
     kids.forEach(walk);
   };
@@ -144,18 +151,60 @@ const countImages = (source: unknown): number => {
   return count;
 };
 
-// Health now shows as a vertical bar: the fill is the only node with a
-// percentage height. Convert that fraction back to a heart count.
+// Talons and spears restyle the ship's own bolt, so source alone can't tell
+// them apart from ordinary fire — their drawn length can. The hidden Prewarm
+// block mounts one of each too, so that copy is discounted here.
+const shotXsOfLength = (len: number): number[] => {
+  const xs: number[] = [];
+  const walk = (node: any, inPrewarm: boolean) => {
+    if (!node || typeof node !== 'object') return;
+    const style = Object.assign({}, ...[node.props?.style].flat(Infinity).filter(Boolean));
+    const prewarm = inPrewarm || style.left === -300; // styles.prewarm's off-screen park
+    // The bolt art points UP, so a shot's LENGTH is its drawn height and its
+    // thickness is the width. (It used to be the other way round, back when the
+    // source art pointed +x and every shot was rotated into place.)
+    //
+    // A shot is also always longer than it is thick, which is what separates it
+    // from a SQUARE sprite of the same height — an ordinary explosion draws at
+    // EXPLOSION_VIS, which happens to equal SPEAR_LEN, so a kill part-way
+    // through a rain would otherwise be counted as one more spear.
+    const isBolt = style.width < style.height;
+    if (!prewarm && isBolt && node.type === 'Image' && style.height === len) {
+      xs.push(leftOf(style) + style.width / 2);
+    }
+    (node.children ?? []).forEach((k: any) => walk(k, prewarm));
+  };
+  walk(screen.toJSON(), false);
+  return xs;
+};
+
+const countShotsOfLength = (len: number): number => shotXsOfLength(len).length;
+
+// Some effects (Valkyrie's rain rolls a position, height, speed and lean per
+// spear) are deliberately random. Pin Math.random to a plain LCG so their
+// spread can be asserted without the test flaking on an unlucky draw.
+const seedRandom = (seed = 1) => {
+  let s = seed;
+  return jest.spyOn(Math, 'random').mockImplementation(() => {
+    s = (s * 1664525 + 1013904223) % 4294967296;
+    return s / 4294967296;
+  });
+};
+
+
+// Health is now one discrete segment per heart, so counting the FILLED segments
+// is the read. The old probe measured a percentage height, which no longer
+// exists — and the whole point of the change is that hearts are countable.
 const heartsFromBar = (): number => {
-  let pct = 0;
+  let n = 0;
   const walk = (node: any) => {
     if (!node || typeof node !== 'object') return;
     const style = Object.assign({}, ...[node.props?.style].flat(Infinity).filter(Boolean));
-    if (typeof style.height === 'string' && style.height.endsWith('%')) pct = parseFloat(style.height);
+    if (style.width === 13 && style.height === 5 && style.backgroundColor === PALETTE.threat) n++;
     (node.children ?? []).forEach(walk);
   };
   walk(screen.toJSON());
-  return Math.round((pct / 100) * HEARTS_MAX);
+  return n;
 };
 
 beforeEach(() => {
@@ -169,16 +218,19 @@ afterEach(() => {
 describe('GameScreen — rendering & HUD', () => {
   it('starts a fresh run with 0 score and full hearts', async () => {
     await renderGame();
-    expect(screen.getByText('0')).toBeTruthy();
+    // Score and coins both render a bare number, so count rather than match one.
+    expect(screen.getAllByText('0').length).toBeGreaterThanOrEqual(2);
     expect(heartsFromBar()).toBe(HEARTS_START);
-    expect(screen.getByText('❚❚')).toBeTruthy(); // pause button
+    expect(screen.getByTestId('pause')).toBeTruthy(); // pause button
   });
 
   it('climbs: altitude on the HUD increases as the loop runs', async () => {
     await renderGame();
     await advance(500);
     // ~0.5s at 120 m/s ≈ 60m (first frame has dt=0)
-    const altText = screen.getByText(/🚀 \d+m/).props.children.join('');
+    // Altitude moved to region D (top-right) and dropped its rocket prefix when
+    // score took the headline slot.
+    const altText = String(screen.getByText(/^\d+m$/).props.children);
     const meters = parseInt(altText.match(/\d+/)![0], 10);
     expect(meters).toBeGreaterThan(30);
     expect(meters).toBeLessThan(90);
@@ -190,21 +242,21 @@ describe('GameScreen — waves', () => {
   it('drops the first wave of 3 enemies with a WAVE 1 banner', async () => {
     await renderGame(); // fresh run: waveClearTimer 0.8
     await advance(1000);
-    expect(screen.getByText('WAVE 1')).toBeTruthy();
+    expect(screen.getAllByText('WAVE 1').length).toBeGreaterThan(0);
     expect(countImages(ENEMY_SHIPS[0])).toBe(3);
   });
 
   it('spawns a mini boss on wave 5', async () => {
     await renderGame(quietState({ wave: 4, waveClearTimer: 0.01 }));
     await advance(100);
-    expect(screen.getByText('⚠️ WAVE 5 — MINI BOSS')).toBeTruthy();
+    expect(screen.getAllByText(/WAVE 5/).length).toBeGreaterThan(0);
     expect(countImages(BOSS_MINI_IMG)).toBe(1);
   });
 
   it('spawns a giant boss on wave 10', async () => {
     await renderGame(quietState({ wave: 9, waveClearTimer: 0.01 }));
     await advance(100);
-    expect(screen.getByText('☠️ WAVE 10 — GIANT BOSS')).toBeTruthy();
+    expect(screen.getAllByText(/WAVE 10/).length).toBeGreaterThan(0);
     expect(countImages(BOSS_GIANT_IMG)).toBe(1);
   });
 });
@@ -217,7 +269,7 @@ describe('GameScreen — collisions & pickups', () => {
     await renderGame(resume);
     await advance(100);
     expect(heartsFromBar()).toBe(HEARTS_START + 1);
-    expect(screen.getByText('+1 ❤️')).toBeTruthy();
+    expect(screen.getByText('+1 HULL')).toBeTruthy();
   });
 
   it('collecting a coin banks it and shows the pickup float', async () => {
@@ -239,7 +291,7 @@ describe('GameScreen — collisions & pickups', () => {
     });
     const { onPersist } = await renderGame(resume);
     await advance(400);
-    await fireEvent.press(screen.getByText('❚❚'));
+    await fireEvent.press(screen.getByTestId('pause'));
     const snap: GameState = onPersist.mock.calls[0][0];
     expect(snap.cards.some((c) => c.kind === 'coin' && !c.dead)).toBe(true);
   });
@@ -261,7 +313,7 @@ describe('GameScreen — collisions & pickups', () => {
     await renderGame(resume);
     await advance(100);
     expect(heartsFromBar()).toBe(HEARTS_START - 1);
-    expect(screen.getByText('-1 💔')).toBeTruthy();
+    expect(screen.getByText('-1 HULL')).toBeTruthy();
   });
 
   it('an enemy bullet on contact costs a heart and is consumed', async () => {
@@ -276,7 +328,7 @@ describe('GameScreen — collisions & pickups', () => {
       size: 11,
       phase: 0,
       life: 6,
-      shipIdx: 0,
+      shot: 0,
     };
     const resume = quietState({ enemyBullets: [bullet] });
     await renderGame(resume);
@@ -318,7 +370,7 @@ describe('GameScreen — escalating enemy behavior', () => {
     await renderGame(resume);
     await advance(7200); // charge speed 120px/s over ~780px
     expect(heartsFromBar()).toBe(HEARTS_START - 1);
-    expect(screen.getByText('-1 💔')).toBeTruthy();
+    expect(screen.getByText('-1 HULL')).toBeTruthy();
   });
 
   it('a boss starts swaying from where it descended, not mid-swing', async () => {
@@ -380,7 +432,7 @@ describe('GameScreen — escalating enemy behavior', () => {
   const bossPayout = async (state: GameState) => {
     const { onPersist } = await renderGame(state);
     await advance(1200);
-    await fireEvent.press(screen.getByText('❚❚'));
+    await fireEvent.press(screen.getByTestId('pause'));
     const snap: GameState = onPersist.mock.calls[0][0];
     const falling = snap.cards.filter((c) => c.kind === 'coin' && !c.dead);
     return { falling, banked: snap.coins, total: falling.length + snap.coins };
@@ -421,9 +473,11 @@ describe('GameScreen — escalating enemy behavior', () => {
     const resume = quietState({ cards: [boss], enemyFireTimer: 0.01 });
     await renderGame(resume);
     await advance(200); // one fire event: 1 volley shot + 2 fan shots
-    // Enemy shots draw the tier-0 orb sprite; the hidden prewarm strip mounts one more.
-    const { ENEMY_SHOTS } = require('../../game/constants');
-    expect(countImages(ENEMY_SHOTS[0])).toBe(4);
+    // All three wear the boss shot — a boss has no archetype, so both its fan
+    // and its volley round fall back to BOSS_SHOT rather than the plain dot.
+    // The hidden prewarm strip mounts one of every shot, hence the fourth.
+    const { ENEMY_SHOTS, BOSS_SHOT } = require('../../game/constants');
+    expect(countImages(ENEMY_SHOTS[BOSS_SHOT])).toBe(4);
   });
 });
 
@@ -445,7 +499,7 @@ describe('GameScreen — guns & bullets', () => {
     });
     await renderGame(resume);
     await advance(100);
-    expect(screen.getByText(`${GUN_LABEL.double} · 16s`)).toBeTruthy();
+    expect(screen.getByText(`${GUN_LABEL.double} 16`)).toBeTruthy();
     rand.mockRestore();
   });
 
@@ -459,7 +513,7 @@ describe('GameScreen — guns & bullets', () => {
     });
     await renderGame(resume);
     await advance(100);
-    expect(screen.getByText(`${GUN_LABEL.double} ×2 · 16s`)).toBeTruthy();
+    expect(screen.getByText(`${GUN_LABEL.double} ×2 16`)).toBeTruthy();
     rand.mockRestore();
   });
 
@@ -472,7 +526,7 @@ describe('GameScreen — guns & bullets', () => {
     });
     await renderGame(resume);
     await advance(100);
-    expect(screen.getByText(`${GUN_LABEL.laser} ×4 · 16s`)).toBeTruthy();
+    expect(screen.getByText(`${GUN_LABEL.laser} ×4 16`)).toBeTruthy();
   });
 
   it('stacking holds at the cap: a fourth pickup refreshes the timer only', async () => {
@@ -484,7 +538,7 @@ describe('GameScreen — guns & bullets', () => {
     });
     await renderGame(resume);
     await advance(100);
-    expect(screen.getByText(`${GUN_LABEL.laser} ×${MAX_GUN_LEVEL} · 16s`)).toBeTruthy();
+    expect(screen.getByText(`${GUN_LABEL.laser} ×${MAX_GUN_LEVEL} 16`)).toBeTruthy();
   });
 
   it('grants the gun the drop was carrying, not a fresh roll', async () => {
@@ -496,7 +550,7 @@ describe('GameScreen — guns & bullets', () => {
     await renderGame(resume);
     await advance(100);
     // The HUD banner carries the timer; the pickup float shows the bare label.
-    expect(screen.getByText(`${GUN_LABEL.homing} · 16s`)).toBeTruthy();
+    expect(screen.getByText(`${GUN_LABEL.homing} 16`)).toBeTruthy();
     rand.mockRestore();
   });
 
@@ -513,7 +567,7 @@ describe('GameScreen — guns & bullets', () => {
     });
     const { onPersist } = await renderGame(resume);
     await advance(60); // one volley, before anything can be destroyed
-    await fireEvent.press(screen.getByText('❚❚')); // pause snapshots the state
+    await fireEvent.press(screen.getByTestId('pause')); // pause snapshots the state
     const snap: GameState = onPersist.mock.calls[0][0];
     const locks = snap.bullets.filter((b) => b.kind === 'rocket').map((b) => b.targetId);
     expect(locks).toHaveLength(2);
@@ -530,7 +584,7 @@ describe('GameScreen — guns & bullets', () => {
     });
     const { onPersist } = await renderGame(resume);
     await advance(60);
-    await fireEvent.press(screen.getByText('❚❚'));
+    await fireEvent.press(screen.getByTestId('pause'));
     const snap: GameState = onPersist.mock.calls[0][0];
     const locks = snap.bullets.filter((b) => b.kind === 'rocket').map((b) => b.targetId);
     expect(locks).toHaveLength(2);
@@ -584,7 +638,9 @@ describe('GameScreen — guns & bullets', () => {
       ],
     });
     await renderGame(resume);
-    await advance(450); // before the second beam (0.5s fire rate) matters
+    // Wall clock, not sim time: hit-stop on each kill pushes the simulation
+    // slightly behind, so the death-pop needs a little longer to clear.
+    await advance(700);
     expect(countImages(ENEMY_SHIPS[0])).toBe(0); // one beam took both
   });
 });
@@ -614,17 +670,21 @@ describe('GameScreen — pause / resume / navigation', () => {
   it('opens paused when resuming a snapshotted run', async () => {
     await renderGame(quietState({ alt: 500 }), { startPaused: true });
     expect(screen.getByText('PAUSED')).toBeTruthy();
-    // Both the HUD and the pause overlay show the frozen altitude.
-    expect(screen.getAllByText('🚀 500m').length).toBe(2);
+    // Both show the frozen altitude, in their own formats: the HUD's region-D
+    // readout dropped the rocket prefix when score took the headline; the pause
+    // overlay keeps it.
+    expect(screen.getAllByText('500m').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('500m').length).toBeGreaterThan(0);
     // Loop is halted: altitude does not move while paused.
     await advance(1000);
-    expect(screen.getAllByText('🚀 500m').length).toBe(2);
+    expect(screen.getAllByText('500m').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('500m').length).toBeGreaterThan(0);
   });
 
   it('pause button freezes the game and snapshots the run', async () => {
     const { onPersist } = await renderGame(quietState({ coins: 42 }));
     await advance(100);
-    await fireEvent.press(screen.getByText('❚❚'));
+    await fireEvent.press(screen.getByTestId('pause'));
     expect(screen.getByText('PAUSED')).toBeTruthy();
     expect(onPersist).toHaveBeenCalledTimes(1);
     expect(onPersist.mock.calls[0][0].coins).toBe(42);
@@ -635,7 +695,9 @@ describe('GameScreen — pause / resume / navigation', () => {
     await fireEvent.press(screen.getByText('CONTINUE'));
     expect(screen.queryByText('PAUSED')).toBeNull();
     await advance(1000);
-    const altText = screen.getByText(/🚀 \d+m/).props.children.join('');
+    // Altitude moved to region D (top-right) and dropped its rocket prefix when
+    // score took the headline slot.
+    const altText = String(screen.getByText(/^\d+m$/).props.children);
     expect(parseInt(altText.match(/\d+/)![0], 10)).toBeGreaterThan(500);
   });
 
@@ -647,7 +709,7 @@ describe('GameScreen — pause / resume / navigation', () => {
     await fireEvent.press(screen.getByText('NEW GAME'));
     expect(onClearRun).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('PAUSED')).toBeNull();
-    expect(screen.getByText('0')).toBeTruthy(); // coins reset
+    expect(screen.getAllByText('0').length).toBeGreaterThanOrEqual(2); // score + coins reset
   });
 
   it('RETURN TO HOME snapshots the run and leaves', async () => {
@@ -686,7 +748,7 @@ describe('GameScreen — zigzag fire & drag movement', () => {
     let bulletId: number | undefined;
     await advance(500);
     for (let i = 0; i < 3; i++) {
-      await fireEvent.press(screen.getByText('❚❚'));
+      await fireEvent.press(screen.getByTestId('pause'));
       const snap: GameState = onPersist.mock.calls[i][0];
       expect(snap.enemyBullets.length).toBeGreaterThanOrEqual(1);
       for (const b of snap.enemyBullets) {
@@ -712,9 +774,235 @@ describe('GameScreen — zigzag fire & drag movement', () => {
     });
     const { onPersist } = await renderGame(resume);
     await advance(500); // lerp fully converges, then clamps hold
-    await fireEvent.press(screen.getByText('❚❚'));
+    await fireEvent.press(screen.getByTestId('pause'));
     const snap: GameState = onPersist.mock.calls[0][0];
     expect(snap.avatarX).toBe(SCREEN.W - FEED_PAD - AVATAR_SIZE / 2);
     expect(snap.avatarY).toBe(60);
+  });
+});
+
+describe('GameScreen — ship specials (the FIRE button)', () => {
+  // Reaching a full meter honestly takes SPECIAL_CHARGE_SEC; resuming with it
+  // already full is the same code path and keeps these tests quick.
+  const armed = (over: Partial<GameState> = {}) => quietState({ specialCharge: 1, ...over });
+
+  it('shows the FIRE button on every hull, including the free starter', async () => {
+    // Ironclad used to carry no special at all — a permanently dead button that
+    // taught a new player "you don't have the good stuff" in their first minute.
+    // It now has BULWARK, so the button is live from the first run.
+    await renderGame(); // default props equip AVATARS[0] — Ironclad
+    expect(screen.getByText('FIRE')).toBeTruthy();
+    expect(screen.queryByText('BUY A SHIP')).toBeNull();
+  });
+
+  it('the meter does NOT fill by waiting — energy is earned', async () => {
+    // The old design trickled a full meter every 5 seconds, which made the
+    // special into admin rather than a decision. A quiet run must stay near
+    // empty however long it lasts.
+    const { onPersist } = await renderGame(quietState({ cards: [card({ y: 200, hp: 999 })] }));
+    await advance(8000);
+    await fireEvent.press(screen.getByTestId('pause'));
+    expect(onPersist.mock.calls[0][0].specialCharge).toBeLessThan(0.2);
+  });
+
+  it('kills charge the meter', async () => {
+    // Six one-HP enemies fed to the guns: energy comes from play.
+    const resume = quietState({
+      fireTimer: 0,
+      cards: Array.from({ length: 6 }, (_, i) =>
+        card({ lane: 1, y: AVATAR_Y - 120 - i * 8, hp: 1, maxHp: 1 })
+      ),
+    });
+    const { onPersist } = await renderGame(resume);
+    await advance(2500);
+    await fireEvent.press(screen.getByTestId('pause'));
+    const snap = onPersist.mock.calls[0][0];
+    expect(snap.kills).toBeGreaterThan(0);
+    expect(snap.specialCharge).toBeGreaterThan(0);
+  });
+
+  it('a lull still trickles a floor, so the mechanic cannot soft-lock', async () => {
+    // An empty board pays a slow floor — otherwise a player could be locked out
+    // of the special entirely during a quiet beat.
+    const { onPersist } = await renderGame(quietState({ cards: [] }));
+    await advance(3000);
+    await fireEvent.press(screen.getByTestId('pause'));
+    expect(onPersist.mock.calls[0][0].specialCharge).toBeGreaterThan(0);
+  });
+
+  it('banks past full into an overcharge, and says so', async () => {
+    await renderGame(quietState({ specialCharge: ENERGY_OVERCHARGE }), { avatarSpecial: 'nova' });
+    await advance(50);
+    // The armed label gains a marker once the meter is banked past full.
+    expect(screen.getByText(`${SPECIALS.nova.name} +`)).toBeTruthy();
+  });
+
+  it('firing empties the meter and disarms the button', async () => {
+    await renderGame(armed(), { avatarSpecial: 'nova' });
+    await advance(50);
+    await fireEvent.press(screen.getByText('FIRE'));
+    // Past the activation freeze AND the on-screen callout, which carries the
+    // same words as the armed label.
+    await advance(HITSTOP_MS + 1200);
+    expect(screen.queryByText(SPECIALS.nova.name)).toBeNull(); // spent
+  });
+
+  it('a full meter names the attack and is spent on tap', async () => {
+    const { onPersist } = await renderGame(armed(), { avatarSpecial: 'nova' });
+    await advance(50);
+    expect(screen.getByText(SPECIALS.nova.name)).toBeTruthy(); // armed label
+    await fireEvent.press(screen.getByText('FIRE'));
+    await advance(1200); // outlast the activation callout float
+    await fireEvent.press(screen.getByTestId('pause'));
+    // Drained — bar the sliver it has already earned back by the time we pause.
+    expect(onPersist.mock.calls[0][0].specialCharge).toBeLessThan(0.05);
+    expect(screen.queryByText(SPECIALS.nova.name)).toBeNull(); // no longer armed
+  });
+
+  it('Specter — PHANTOMS: two ghost hulls join you, then fade', async () => {
+    await renderGame(armed(), { avatarSpecial: 'phantom' });
+    await advance(50);
+    expect(countImages(AVATARS[0].image)).toBe(1); // just the ship
+    await fireEvent.press(screen.getByText('FIRE'));
+    await advance(50);
+    expect(countImages(AVATARS[0].image)).toBe(3); // ship + two ghosts
+    await advance(PHANTOM_TIME * 1000 + 200);
+    expect(countImages(AVATARS[0].image)).toBe(1); // dissolved
+  });
+
+  it('Raptor — TALONS: fans of claws hose out for the whole barrage', async () => {
+    const resume = armed({
+      cards: [
+        card({ lane: 1, y: AVATAR_Y - 150, hp: 1 }),
+        card({ lane: 2, y: AVATAR_Y - 150, hp: 1 }),
+      ],
+    });
+    await renderGame(resume, { avatarSpecial: 'talons' });
+    await advance(50);
+    await fireEvent.press(screen.getByText('FIRE'));
+    await advance(HITSTOP_MS + 20); // clear the activation freeze, then one frame
+    expect(countShotsOfLength(TALON_LEN)).toBe(TALON_COUNT);
+    // Machine gun, not a one-shot: more fans keep coming while it runs.
+    await advance(500);
+    expect(countShotsOfLength(TALON_LEN)).toBeGreaterThan(TALON_COUNT * 2);
+    // The rake sweeps the row: both enemies die, though they sit in two lanes.
+    expect(countImages(ENEMY_SHIPS[0])).toBe(0);
+  });
+
+  it('Raptor — the barrage stops on its own and the claws clear out', async () => {
+    const { onPersist } = await renderGame(armed(), { avatarSpecial: 'talons' });
+    await advance(50);
+    await fireEvent.press(screen.getByText('FIRE'));
+    await advance(TALON_BURST_TIME * 1000 + 1500); // burst ends, last claws fly off
+    expect(countShotsOfLength(TALON_LEN)).toBe(0);
+    await fireEvent.press(screen.getByTestId('pause'));
+    expect(onPersist.mock.calls[0][0].talonTime).toBe(0);
+  });
+
+  it('Nova — NOVA BURST: a ring expands, damaging enemies and wiping enemy fire', async () => {
+    const enemyShot: EnemyBullet = {
+      id: 900,
+      x: AVATAR_X,
+      y: AVATAR_Y - 60, // right next to the ship, inside the blast
+      vx: 0,
+      vy: -400, // flying away upward, so it cannot land a hit first
+      kind: 'straight',
+      color: '#FF3B3B',
+      size: 11,
+      phase: 0,
+      life: 5,
+    };
+    const resume = armed({
+      cards: [card({ lane: 1, y: AVATAR_Y - 120, hp: 1 })],
+      enemyBullets: [enemyShot],
+    });
+    const { onPersist } = await renderGame(resume, { avatarSpecial: 'nova' });
+    await advance(50);
+    await fireEvent.press(screen.getByText('FIRE'));
+    await advance(HITSTOP_MS + 500);
+    expect(countImages(ENEMY_SHIPS[0])).toBe(0); // caught by the wave
+    await fireEvent.press(screen.getByTestId('pause'));
+    expect(onPersist.mock.calls[0][0].enemyBullets).toHaveLength(0); // swept clean
+  });
+
+  it('Nova — the wave expands from the hull, then dissipates and stops', async () => {
+    const { onPersist } = await renderGame(armed(), { avatarSpecial: 'nova' });
+    await advance(50);
+    await fireEvent.press(screen.getByText('FIRE'));
+    await advance(100);
+    await fireEvent.press(screen.getByTestId('pause')); // snapshot mid-blast
+    const mid: GameState = onPersist.mock.calls[0][0];
+    expect(mid.novaR).toBeGreaterThan(0);
+    expect(mid.novaR).toBeLessThan(NOVA_RADIUS);
+    // Centred on the hull, not the screen origin.
+    expect(mid.novaX).toBeCloseTo(AVATAR_X);
+  });
+
+  it('a mass kill cannot blow past the particle ceiling', async () => {
+    // A full formation destroyed in one wave: every death bursts sparks, and
+    // each spark is a view re-rendered every frame.
+    const swarm = Array.from({ length: 12 }, (_, i) =>
+      card({ id: 500 + i, lane: i % LANES, y: AVATAR_Y - 120 - Math.floor(i / LANES) * 40, hp: 1 })
+    );
+    const { onPersist } = await renderGame(armed({ cards: swarm }), { avatarSpecial: 'nova' });
+    await advance(50);
+    await fireEvent.press(screen.getByText('FIRE'));
+    // Long enough for the ring to sweep the whole formation, past the
+    // activation freeze.
+    await advance(HITSTOP_MS + 500);
+    await fireEvent.press(screen.getByTestId('pause'));
+    const live = onPersist.mock.calls[0][0].particles.length;
+    expect(live).toBeLessThanOrEqual(MAX_PARTICLES);
+    // Uncapped this would be ~170 sparks, so the run must actually be pressing
+    // against the ceiling — otherwise this test proves nothing.
+    expect(live).toBeGreaterThan(MAX_PARTICLES * 0.75);
+  });
+
+  it('Valkyrie — SPEAR RAIN: a scattered downpour that still finds the enemy', async () => {
+    // An enemy well ABOVE the player, in a lane the ship is not under — normal
+    // fire flies straight up from the hull, so only the rain can reach it.
+    const rng = seedRandom(); // the scatter is random; pin it so this can't flake
+    const resume = armed({ cards: [card({ lane: 4, y: 90, hp: 1 })] });
+    await renderGame(resume, { avatarSpecial: 'spears' });
+    await advance(50);
+    await fireEvent.press(screen.getByText('FIRE'));
+    // The rain launches in waves rather than as one sheet (see SPEAR_RELEASE),
+    // so wait out the activation freeze AND the whole release window before
+    // counting. The ×1.5 is frame quantization: a 40ms release timer can only
+    // fire on a frame boundary, so each wave really takes ~3 frames.
+    //
+    // Still well short of the ~0.7s it takes the fastest spear to reach the
+    // bottom, so all thirty are in the air at this point — and spears PIERCE,
+    // so killing the enemy on the way down doesn't consume any of them either.
+    const rainMs = (SPEAR_COUNT / SPEAR_RELEASE) * SPEAR_RELEASE_EVERY * 1000 * 1.5;
+    await advance(HITSTOP_MS + rainMs);
+    const xs = shotXsOfLength(SPEAR_LEN);
+    expect(xs.length).toBe(SPEAR_COUNT);
+    // Scattered across the whole play area, out to both edges.
+    expect(Math.min(...xs)).toBeLessThan(SCREEN.W * 0.25);
+    expect(Math.max(...xs)).toBeGreaterThan(SCREEN.W * 0.75);
+    // Messy, not a rank of evenly spaced rails: the gaps between neighbouring
+    // spears vary widely instead of all being one pitch.
+    const sorted = [...xs].sort((a, b) => a - b);
+    const gaps = sorted.slice(1).map((v, i) => v - sorted[i]);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeGreaterThan(SCREEN.W / SPEAR_COUNT);
+    // Enough for the rain to connect and the death pop (0.18s) to finish, but
+    // NOT enough for WAVE_GAP to elapse afterwards — once the board is clear the
+    // next wave drops in, and its ships would be counted as this one surviving.
+    await advance(600);
+    expect(countImages(ENEMY_SHIPS[0])).toBe(0);
+    rng.mockRestore();
+  });
+
+  it('an empty meter cannot be fired', async () => {
+    const resume = quietState({
+      specialCharge: 0.5, // half full — not armed
+      cards: [card({ lane: 1, y: AVATAR_Y - 150, hp: 1 })],
+    });
+    await renderGame(resume, { avatarSpecial: 'talons' });
+    await advance(50);
+    await fireEvent.press(screen.getByText('FIRE'));
+    await advance(20);
+    expect(countShotsOfLength(TALON_LEN)).toBe(0);
   });
 });

@@ -29,6 +29,19 @@
         "backgroundColor": "#0B0D10"
       }
     },
-    "assetBundlePatterns": ["**/*"]
+    "assetBundlePatterns": [
+      "assets/*.png",
+      "assets/avatars/*.png",
+      "assets/background/*.jpg",
+      "assets/background/*.png",
+      "assets/bullets/*.png",
+      "assets/effects/*.png",
+      "assets/obstacles/*.png",
+      "assets/sounds/*.wav"
+    ],
+    "plugins": [
+      "expo-font",
+      "./plugins/withPreferred60Hz"
+    ]
   }
 }

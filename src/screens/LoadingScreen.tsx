@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef } from 'react';
+import { FONTS } from '../game/type';
 import { View, Text, Image, StyleSheet } from 'react-native';
 import { PRELOAD_SPRITES } from '../game/preload';
 import { PALETTE } from '../game/constants';
@@ -67,13 +68,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: PALETTE.bg,
+    backgroundColor: PALETTE.void,
     paddingHorizontal: 32,
   },
   title: {
-    color: PALETTE.text,
+    color: PALETTE.ink,
     fontSize: 26,
-    fontWeight: '900',
+    fontFamily: FONTS.display,
     letterSpacing: 3,
     marginBottom: 26,
   },
@@ -82,18 +83,18 @@ const styles = StyleSheet.create({
     maxWidth: 280,
     height: 6,
     borderRadius: 3,
-    backgroundColor: PALETTE.cardBorder,
+    backgroundColor: PALETTE.edge,
     overflow: 'hidden',
   },
   fill: {
     height: '100%',
     borderRadius: 3,
-    backgroundColor: PALETTE.moment,
+    backgroundColor: PALETTE.plasma,
   },
   pct: {
-    color: PALETTE.textDim,
+    color: PALETTE.inkDim,
     fontSize: 12.5,
-    fontWeight: '700',
+    fontFamily: FONTS.display,
     letterSpacing: 1.2,
     marginTop: 14,
   },

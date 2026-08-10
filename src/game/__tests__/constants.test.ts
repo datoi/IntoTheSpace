@@ -7,13 +7,35 @@ import {
   shipForWave,
   SHIP_WAVES,
   ENEMY_SHIPS,
-  enemyShotForShip,
+  enemyShotFor,
+  ENEMY_SHOT_FOR_ARCH,
+  BOSS_SHOT,
   ENEMY_SHOTS,
   ENEMY_SHOT_ASPECT,
   BOSS_MINI_HP,
   BOSS_GIANT_HP,
   BG_SETS,
   AVATARS,
+  QUALITY_TIERS,
+  BURST_MAX,
+  HITSTOP_KILL,
+  HITSTOP_ELITE,
+  HITSTOP_BOSS_PHASE,
+  HITSTOP_BOSS_KILL,
+  HITSTOP_MAX,
+  SHAKE_AMP,
+  SHAKE_REF,
+  SHAKE_MAX,
+  SHAKE_MAX_PX,
+  BOMB_SHAKE,
+  MAX_PARTICLES,
+  MAX_EXPLOSIONS,
+  MAX_ENEMY_BULLETS,
+  WAVE_MAX_ENEMIES,
+  QUALITY_DROP_FRAC,
+  QUALITY_RAISE_FRAC,
+  FRAME_BUDGET_MS,
+  PERF_OVERLAY,
   GUN_LABEL,
   WAVE_COLORS,
   HEARTS_START,
@@ -22,7 +44,9 @@ import {
   HEART_EVERY,
   AVATAR_Y,
   AVATAR_SIZE,
+  SPECIALS,
 } from '../constants';
+import { ARCH_KINDS } from '../enemies';
 
 describe('laneX', () => {
   it('centers lane 0 half a lane-width in from the left pad', () => {
@@ -80,22 +104,34 @@ describe('shipForWave', () => {
   });
 });
 
-describe('enemyShotForShip', () => {
-  it('maps each ship tier to a shot sprite index in range', () => {
-    for (let s = 0; s < ENEMY_SHIPS.length; s++) {
-      const idx = enemyShotForShip(s);
+describe('enemy shot art follows the archetype, not the ship tier', () => {
+  it('gives every archetype a shot index in range', () => {
+    for (const k of ARCH_KINDS) {
+      const idx = ENEMY_SHOT_FOR_ARCH[k];
+      expect(Number.isInteger(idx)).toBe(true);
       expect(idx).toBeGreaterThanOrEqual(0);
       expect(idx).toBeLessThan(ENEMY_SHOTS.length);
     }
   });
 
-  it('cycles: the 6th ship tier reuses the first shot sprite', () => {
-    expect(enemyShotForShip(ENEMY_SHOTS.length)).toBe(0);
+  it('gives every archetype that actually fires its OWN shot', () => {
+    // The point of the change. Kamikaze never fires and the Mine Layer's mines
+    // are drawn rather than sprited, so those two alias another entry; every
+    // remaining archetype must be distinguishable by its bullet alone.
+    const firing = ARCH_KINDS.filter((k) => k !== 'kamikaze' && k !== 'layer');
+    const used = firing.map((k) => ENEMY_SHOT_FOR_ARCH[k]);
+    expect(new Set(used).size).toBe(used.length);
   });
 
-  it('handles negative ship indices without going out of range', () => {
-    expect(enemyShotForShip(-1)).toBeGreaterThanOrEqual(0);
-    expect(enemyShotForShip(-1)).toBeLessThan(ENEMY_SHOTS.length);
+  it('keeps the boss shot distinct from every archetype', () => {
+    expect(BOSS_SHOT).toBeGreaterThanOrEqual(0);
+    expect(BOSS_SHOT).toBeLessThan(ENEMY_SHOTS.length);
+    for (const k of ARCH_KINDS) expect(ENEMY_SHOT_FOR_ARCH[k]).not.toBe(BOSS_SHOT);
+  });
+
+  it('resolves a missing archetype to the plain dot rather than a sprite', () => {
+    expect(enemyShotFor(undefined)).toBeUndefined();
+    expect(enemyShotFor('sniper')).toBe(ENEMY_SHOT_FOR_ARCH.sniper);
   });
 
   it('has one aspect ratio per shot sprite', () => {
@@ -177,5 +213,168 @@ describe('game data integrity', () => {
   it('the avatar flies in the lower part of the screen', () => {
     expect(AVATAR_Y).toBeGreaterThan(SCREEN.H / 2);
     expect(AVATAR_Y + AVATAR_SIZE).toBeLessThanOrEqual(SCREEN.H);
+  });
+
+  // The array order is the tier order: the shot-colour ramp and the "stronger
+  // with price" comments both read off it, so a reorder must not desync it.
+  it('ships are listed cheapest-first', () => {
+    const prices = AVATARS.map((a) => a.price);
+    expect([...prices].sort((a, b) => a - b)).toEqual(prices);
+  });
+
+  it('every ship — including the free starter — names a real special', () => {
+    // The starter used to carry 'none', i.e. a permanently dead FIRE button.
+    // That taught a new player "you don't have the good stuff" in their first
+    // minute instead of teaching them the verb, so Ironclad now has Bulwark.
+    for (const a of AVATARS) {
+      expect(SPECIALS[a.special]).toBeDefined();
+      expect(SPECIALS[a.special].name).toBeTruthy();
+    }
+  });
+
+  it('no two ships share a special, so each hull sells a different playstyle', () => {
+    const specials = AVATARS.map((a) => a.special);
+    expect(new Set(specials).size).toBe(specials.length);
+  });
+
+});
+
+describe('enemy shot ceiling', () => {
+  it('leaves room for a full formation to fire without ever engaging', () => {
+    // The ceiling is a bound on the pathological tail, NOT a balance lever. If
+    // it sits near what ordinary play produces it stops being a safety valve
+    // and starts silently cancelling attacks the difficulty curve intended.
+    // A full formation each holding a few shots in flight is ordinary; the cap
+    // must be comfortably above it.
+    expect(MAX_ENEMY_BULLETS).toBeGreaterThan(WAVE_MAX_ENEMIES * 4);
+  });
+
+  it('stays small enough to actually bound the frame', () => {
+    // Every live shot is a native view written every frame. A ceiling this is
+    // allowed to grow past would defeat its own purpose.
+    expect(MAX_ENEMY_BULLETS).toBeLessThanOrEqual(96);
+  });
+
+  it('is NOT tier-scaled — every device plays the same game', () => {
+    // The tiers promise they only change how lavishly events are DRAWN. An
+    // enemy shot is something the player acts on, so scaling it per device
+    // would make the game easier on a slow phone. Guard the promise.
+    for (const tier of QUALITY_TIERS) {
+      expect(tier).not.toHaveProperty('enemyBullets');
+    }
+  });
+});
+
+describe('adaptive quality tiers', () => {
+  it('starts at full detail — every phone gets the real game first', () => {
+    expect(QUALITY_TIERS[0]).toEqual({
+      particles: MAX_PARTICLES,
+      explosions: MAX_EXPLOSIONS,
+      burst: 1,
+      bgLayers: 3,
+      planets: true,
+    });
+  });
+
+  it('draws every layer of the richest sky at full detail', () => {
+    // Tier 0 must not silently trim a background just because a new set was
+    // authored with more layers than the tier table knew about.
+    const deepest = Math.max(...BG_SETS.map((s) => s.layers.length));
+    expect(QUALITY_TIERS[0].bgLayers).toBeGreaterThanOrEqual(deepest);
+  });
+
+  it('every step down actually draws less', () => {
+    // A tier that isn't strictly cheaper than the one above buys nothing and
+    // makes the governor's climb-back hysteresis meaningless.
+    for (let i = 1; i < QUALITY_TIERS.length; i++) {
+      const prev = QUALITY_TIERS[i - 1];
+      const cur = QUALITY_TIERS[i];
+      expect(cur.particles).toBeLessThan(prev.particles);
+      expect(cur.explosions).toBeLessThan(prev.explosions);
+      expect(cur.burst).toBeLessThan(prev.burst);
+      // The sky is the sustained cost, so it may only ever get cheaper too —
+      // though it steps rather than falling at every tier.
+      expect(cur.bgLayers).toBeLessThanOrEqual(prev.bgLayers);
+      expect(Number(cur.planets)).toBeLessThanOrEqual(Number(prev.planets));
+    }
+  });
+
+  it('never trims the sky away entirely', () => {
+    // A background is not optional — losing the last layer leaves bare void,
+    // which reads as the game failing to load rather than running lean.
+    for (const t of QUALITY_TIERS) expect(t.bgLayers).toBeGreaterThanOrEqual(1);
+  });
+
+  it('the lowest tier still shows an effect at all', () => {
+    // Degrading to nothing would read as the game being broken rather than as
+    // it running lean — a kill has to stay legible on the weakest device.
+    const floor = QUALITY_TIERS[QUALITY_TIERS.length - 1];
+    expect(floor.particles).toBeGreaterThan(0);
+    expect(floor.explosions).toBeGreaterThan(0);
+    expect(floor.burst).toBeGreaterThan(0);
+  });
+
+  it('leaves a gap between dropping a tier and climbing back', () => {
+    // Without it a device sitting on the threshold oscillates, and effects
+    // popping in and out is worse than simply having fewer of them.
+    expect(QUALITY_RAISE_FRAC).toBeLessThan(QUALITY_DROP_FRAC);
+  });
+
+  it('budgets a frame above 60Hz but below half rate', () => {
+    // Above 16.7ms so ordinary jitter doesn't register as a dropped frame;
+    // below 33.3ms so the governor reacts before the game is visibly halved.
+    expect(FRAME_BUDGET_MS).toBeGreaterThan(1000 / 60);
+    expect(FRAME_BUDGET_MS).toBeLessThan(1000 / 30);
+  });
+
+  it('ships with the profiler off', () => {
+    expect(PERF_OVERLAY).toBe(false);
+  });
+
+  it('caps a single burst below the whole field', () => {
+    // Neither the board-load scale nor the frame-time governor can stop one
+    // event filling the pool in one frame — the governor decides over 45 frames
+    // and a burst is gone in 40. This cap is the only instant one.
+    expect(BURST_MAX).toBeGreaterThan(0);
+    expect(BURST_MAX).toBeLessThan(MAX_PARTICLES);
+  });
+});
+
+describe('hit-stop', () => {
+  it('freezes strictly longer for bigger events', () => {
+    // The ordering is what makes a freeze read as "that was a bigger deal"
+    // rather than as inconsistent performance. Equal values would flatten it.
+    expect(HITSTOP_KILL).toBeLessThan(HITSTOP_ELITE);
+    expect(HITSTOP_ELITE).toBeLessThan(HITSTOP_BOSS_PHASE);
+    expect(HITSTOP_BOSS_PHASE).toBeLessThan(HITSTOP_BOSS_KILL);
+  });
+
+  it('bounds every freeze by the ceiling the loop clamps to', () => {
+    for (const v of [HITSTOP_KILL, HITSTOP_ELITE, HITSTOP_BOSS_PHASE, HITSTOP_BOSS_KILL]) {
+      expect(v).toBeLessThanOrEqual(HITSTOP_MAX);
+    }
+  });
+
+  it('keeps the longest freeze under six frames at 60Hz', () => {
+    // Past roughly this point a deliberate freeze stops reading as impact and
+    // starts reading as a dropped frame — which is what was reported.
+    expect(HITSTOP_MAX).toBeLessThanOrEqual(6 / 60);
+  });
+});
+
+describe('camera shake', () => {
+  it('either covers the hardest hit in the game, or is off entirely', () => {
+    // SHAKE_MAX_PX is what the sky and the scrim are inflated by. A partial
+    // margin is the one useless setting: it costs the geometry complexity of
+    // inflating everything and still lets a strip show at peak shake. So it is
+    // either enough for the hardest hit, or 0 — which restores exactly the
+    // uninflated geometry rather than an in-between.
+    const peakTravel = (SHAKE_AMP / 2) * (SHAKE_MAX / SHAKE_REF);
+    expect(SHAKE_MAX_PX === 0 || SHAKE_MAX_PX >= peakTravel).toBe(true);
+  });
+
+  it('quotes every hit against an intensity the game actually uses', () => {
+    expect(SHAKE_REF).toBeGreaterThan(0);
+    expect(SHAKE_MAX).toBeGreaterThanOrEqual(BOMB_SHAKE);
   });
 });

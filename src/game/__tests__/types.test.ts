@@ -4,6 +4,7 @@
  * be snapshotted to storage and resumed". These tests pin that contract.
  */
 import { GameState, Card, Bullet, EnemyBullet, RunResult } from '../types';
+import { freshRunState } from '../runstate';
 
 const card: Card = {
   id: 1,
@@ -39,40 +40,25 @@ const enemyBullet: EnemyBullet = {
   size: 11,
   phase: 1.2,
   life: 4.5,
-  shipIdx: 1,
+  shot: 1,
 };
 
+// freshRunState() is the canonical GameState; only the fields this test asserts
+// on are overridden, so a schema addition can't break the serialization check.
 const state: GameState = {
-  avatarX: 100,
-  avatarY: 600,
-  targetX: 100,
-  targetY: 600,
-  dragDX: 0,
-  dragDY: 0,
-  dragging: true,
+  ...freshRunState(),
   alt: 5000,
   wave: 7,
-  waveClearTimer: 1.1,
   gun: 'homing',
   gunTime: 8,
   gunLevel: 2,
-  fireTimer: 0.1,
-  giftTimer: 3,
-  heartTimer: 12,
-  coinTimer: 5,
-  enemyFireTimer: 0.9,
+  dragging: true,
+  specialCharge: 0.5,
+  cards: [card],
   bullets: [bullet],
   enemyBullets: [enemyBullet],
-  cards: [card],
-  particles: [{ id: 4, x: 1, y: 2, vx: 3, vy: 4, life: 0.5, color: '#FFF000', size: 5 }],
-  floats: [{ id: 5, x: 1, y: 2, text: '+10', color: '#FFD32A', life: 0.8 }],
-  elapsed: 30,
-  distTimer: 0.4,
   hearts: 2,
   coins: 12,
-  shake: 0,
-  hitFlash: 0,
-  nextId: 99,
 };
 
 describe('GameState serializability contract', () => {
@@ -103,7 +89,7 @@ describe('GameState serializability contract', () => {
   });
 
   it('RunResult carries only plain numbers', () => {
-    const r: RunResult = { coins: 2, altitude: 5 };
+    const r: RunResult = { coins: 2, score: 8400, bestMult: 5, grazes: 12, altitude: 5, crystals: 1, chips: 0, alloy: 0, wave: 4, stats: { kills: 3 } };
     expect(JSON.parse(JSON.stringify(r))).toEqual(r);
   });
 });
