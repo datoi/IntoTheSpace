@@ -12,7 +12,8 @@ import {
   SHOT_LASER_IMG,
   ENEMY_SHOTS,
   ENEMY_SHOT_ASPECT,
-  EXPLOSIONS,
+  EXPLOSION_SHEETS,
+  EXPLOSION_FRAMES,
   EXPLOSION_VIS,
   EXPLOSION_BOSS,
   EXPLOSION_BOSS_SCALE,
@@ -63,25 +64,30 @@ export const PRELOAD_SPRITES: PreloadSprite[] = [
     const w = ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE;
     return { src, w, h: w / ENEMY_SHOT_ASPECT[i] };
   }),
-  // Every explosion frame. A death animation steps ten sources in under half a
-  // second, so a cold decode part-way through would drop frames out of the
-  // middle of the burst — the one place a gap is most visible. Warmed at their
-  // DRAWN size (92px), not the 192px source, so all sixty cost a few MB.
-  ...EXPLOSIONS.flat().map((src) => ({ src, w: EXPLOSION_VIS, h: EXPLOSION_VIS })),
+  // The explosion sheets — SIX bitmaps, where this used to be sixty separate
+  // frames plus ten of them a second time at boss scale. A sheet holds all ten
+  // frames of a style in one image, so warming it warms the whole animation and
+  // there is no way for a decode to land part-way through a burst.
+  //
+  // Warmed at the width the strip is actually DRAWN at (EXPLOSION_FRAMES × the
+  // per-frame size), not the 1920px source, for the same reason the individual
+  // frames were: a bitmap warmed at one size decodes again at another.
+  ...EXPLOSION_SHEETS.map((src) => ({
+    src,
+    w: EXPLOSION_VIS * EXPLOSION_FRAMES,
+    h: EXPLOSION_VIS,
+  })),
   // …and the boss style AGAIN at the size a boss actually draws it.
   //
-  // A bitmap warmed at one size decodes again at another, and a boss fireball
-  // is EXPLOSION_BOSS_SCALE× the ordinary one — so every frame of the biggest
-  // explosion in the game was decoding cold despite the line above, ten of them
-  // inside half a second, on the frame a boss dies. That frame is already
-  // carrying the payout fan, the debris burst and a forced hit-stop; the decode
-  // was landing on top of the worst of it. Only the one style a boss uses needs
-  // this, so it costs ten bitmaps rather than sixty.
-  ...EXPLOSIONS[EXPLOSION_BOSS].map((src) => ({
-    src,
-    w: EXPLOSION_VIS * EXPLOSION_BOSS_SCALE,
+  // A boss fireball is EXPLOSION_BOSS_SCALE× the ordinary one, so without this
+  // the biggest explosion in the game decodes cold on the frame a boss dies —
+  // a frame already carrying the payout fan, the debris burst and a forced
+  // hit-stop. One extra bitmap now, where it used to be ten.
+  {
+    src: EXPLOSION_SHEETS[EXPLOSION_BOSS],
+    w: EXPLOSION_VIS * EXPLOSION_BOSS_SCALE * EXPLOSION_FRAMES,
     h: EXPLOSION_VIS * EXPLOSION_BOSS_SCALE,
-  })),
+  },
 ];
 
 // Every module the run can reach, backgrounds included. Downloading only puts

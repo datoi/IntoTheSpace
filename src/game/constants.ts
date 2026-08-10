@@ -184,86 +184,34 @@ export const EXPLOSION_BOSS_SCALE = 2.4;
  */
 export const MAX_EXPLOSIONS = 8;
 
-export const EXPLOSIONS: number[][] = [
-  // 0 crimson — for the red hulls (enemy01 / 03 / 11)
-  [
-    require('../../assets/effects/exp_crimson_01.png'),
-    require('../../assets/effects/exp_crimson_02.png'),
-    require('../../assets/effects/exp_crimson_03.png'),
-    require('../../assets/effects/exp_crimson_04.png'),
-    require('../../assets/effects/exp_crimson_05.png'),
-    require('../../assets/effects/exp_crimson_06.png'),
-    require('../../assets/effects/exp_crimson_07.png'),
-    require('../../assets/effects/exp_crimson_08.png'),
-    require('../../assets/effects/exp_crimson_09.png'),
-    require('../../assets/effects/exp_crimson_10.png'),
-  ],
-  // 1 green — enemy02 / 05 / 06
-  [
-    require('../../assets/effects/exp_green_01.png'),
-    require('../../assets/effects/exp_green_02.png'),
-    require('../../assets/effects/exp_green_03.png'),
-    require('../../assets/effects/exp_green_04.png'),
-    require('../../assets/effects/exp_green_05.png'),
-    require('../../assets/effects/exp_green_06.png'),
-    require('../../assets/effects/exp_green_07.png'),
-    require('../../assets/effects/exp_green_08.png'),
-    require('../../assets/effects/exp_green_09.png'),
-    require('../../assets/effects/exp_green_10.png'),
-  ],
-  // 2 teal — enemy07 / 08 / 10
-  [
-    require('../../assets/effects/exp_teal_01.png'),
-    require('../../assets/effects/exp_teal_02.png'),
-    require('../../assets/effects/exp_teal_03.png'),
-    require('../../assets/effects/exp_teal_04.png'),
-    require('../../assets/effects/exp_teal_05.png'),
-    require('../../assets/effects/exp_teal_06.png'),
-    require('../../assets/effects/exp_teal_07.png'),
-    require('../../assets/effects/exp_teal_08.png'),
-    require('../../assets/effects/exp_teal_09.png'),
-    require('../../assets/effects/exp_teal_10.png'),
-  ],
-  // 3 aqua — enemy09
-  [
-    require('../../assets/effects/exp_aqua_01.png'),
-    require('../../assets/effects/exp_aqua_02.png'),
-    require('../../assets/effects/exp_aqua_03.png'),
-    require('../../assets/effects/exp_aqua_04.png'),
-    require('../../assets/effects/exp_aqua_05.png'),
-    require('../../assets/effects/exp_aqua_06.png'),
-    require('../../assets/effects/exp_aqua_07.png'),
-    require('../../assets/effects/exp_aqua_08.png'),
-    require('../../assets/effects/exp_aqua_09.png'),
-    require('../../assets/effects/exp_aqua_10.png'),
-  ],
-  // 4 cyan — the cool hulls, enemy04 / 12
-  [
-    require('../../assets/effects/exp_cyan_01.png'),
-    require('../../assets/effects/exp_cyan_02.png'),
-    require('../../assets/effects/exp_cyan_03.png'),
-    require('../../assets/effects/exp_cyan_04.png'),
-    require('../../assets/effects/exp_cyan_05.png'),
-    require('../../assets/effects/exp_cyan_06.png'),
-    require('../../assets/effects/exp_cyan_07.png'),
-    require('../../assets/effects/exp_cyan_08.png'),
-    require('../../assets/effects/exp_cyan_09.png'),
-    require('../../assets/effects/exp_cyan_10.png'),
-  ],
-  // 5 fire — bosses only: a real fireball, so the big kill does not look like a
-  // large version of the small one.
-  [
-    require('../../assets/effects/exp_fire_01.png'),
-    require('../../assets/effects/exp_fire_02.png'),
-    require('../../assets/effects/exp_fire_03.png'),
-    require('../../assets/effects/exp_fire_04.png'),
-    require('../../assets/effects/exp_fire_05.png'),
-    require('../../assets/effects/exp_fire_06.png'),
-    require('../../assets/effects/exp_fire_07.png'),
-    require('../../assets/effects/exp_fire_08.png'),
-    require('../../assets/effects/exp_fire_09.png'),
-    require('../../assets/effects/exp_fire_10.png'),
-  ],
+/**
+ * One horizontal sprite sheet per colour family, frames left to right.
+ *
+ * This was sixty separate PNGs — ten per style — stepped by swapping an
+ * <Image>'s `source` ten times across EXPLOSION_LIFE. With MAX_EXPLOSIONS
+ * burning at once that is ~180 source changes a second, each one a trip through
+ * the native image pipeline even on a cache hit, and it peaked on exactly the
+ * frame a formation died. It was the last measurable stutter in the game.
+ *
+ * With a sheet the source NEVER changes: the image mounts once and the frame is
+ * chosen by translating the strip inside a clip, which is a pure transform —
+ * no layout, no image pipeline. It also turns sixty preloaded, simultaneously
+ * decoded bitmaps into six.
+ *
+ * Frame N sits at x = N * (sheet width / EXPLOSION_FRAMES). Built by
+ * scripts/make-explosion-sheets.mjs, which is the source of truth for the
+ * packing — the index into this array is the style stored on a live explosion,
+ * SO THE ORDER MUST MATCH THE SCRIPT'S.
+ */
+export const EXPLOSION_SHEETS: number[] = [
+  require('../../assets/effects/exp_crimson.png'), // 0 — red hulls (enemy01 / 03 / 11)
+  require('../../assets/effects/exp_green.png'), //   1 — enemy02 / 05 / 06
+  require('../../assets/effects/exp_teal.png'), //    2 — enemy07 / 08 / 10
+  require('../../assets/effects/exp_aqua.png'), //    3 — enemy09
+  require('../../assets/effects/exp_cyan.png'), //    4 — the cool hulls, enemy04 / 12
+  // 5 — bosses only: a real fireball, so the big kill does not read as a large
+  // version of the small one.
+  require('../../assets/effects/exp_fire.png'),
 ];
 
 export const EXPLOSION_BOSS = 5;

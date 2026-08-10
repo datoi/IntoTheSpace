@@ -5,7 +5,7 @@ import {
   ENEMY_SHOTS,
   BG_SETS,
   ENEMY_SHIP_VIS,
-  EXPLOSIONS,
+  EXPLOSION_SHEETS,
   EXPLOSION_FRAMES,
   EXPLOSION_FOR_SHIP,
   EXPLOSION_BOSS,
@@ -24,12 +24,12 @@ describe('preload — the sprite warm list', () => {
     for (const ship of ENEMY_SHIPS) expect(sources).toContain(ship);
     for (const shot of ENEMY_SHOTS) expect(sources).toContain(shot);
     for (const a of AVATARS) expect(sources).toContain(a.shot.src);
-    // Every explosion frame: a death animation steps ten sources in half a
-    // second, so a cold decode mid-burst would tear a hole in the effect.
-    for (const style of EXPLOSIONS) for (const frame of style) expect(sources).toContain(frame);
+    // Every explosion sheet. One sheet holds a whole style, so warming it
+    // warms all EXPLOSION_FRAMES at once and no decode can land mid-burst.
+    for (const sheet of EXPLOSION_SHEETS) expect(sources).toContain(sheet);
     // avatar images + ships + 2 bosses + 3 gun shots + avatar shots
-    // + enemy shots + every explosion frame + the boss style warmed AGAIN at
-    // the larger size a boss draws it (see below)
+    // + enemy shots + one sheet per style + the boss sheet warmed AGAIN at the
+    // larger size a boss draws it (see below)
     expect(PRELOAD_SPRITES.length).toBe(
       AVATARS.length +
         ENEMY_SHIPS.length +
@@ -37,8 +37,8 @@ describe('preload — the sprite warm list', () => {
         3 +
         AVATARS.length +
         ENEMY_SHOTS.length +
-        EXPLOSIONS.length * EXPLOSION_FRAMES +
-        EXPLOSION_FRAMES
+        EXPLOSION_SHEETS.length +
+        1
     );
   });
 
@@ -47,20 +47,18 @@ describe('preload — the sprite warm list', () => {
     // fireball is EXPLOSION_BOSS_SCALE× the ordinary one — so without this entry
     // all ten frames of the biggest explosion in the game decode cold, on the
     // frame a boss dies. Every other explosion is warmed only at EXPLOSION_VIS.
-    const bossSize = EXPLOSION_VIS * EXPLOSION_BOSS_SCALE;
-    for (const frame of EXPLOSIONS[EXPLOSION_BOSS]) {
-      const sizes = PRELOAD_SPRITES.filter((s) => s.src === frame).map((s) => s.w);
-      expect(sizes).toContain(EXPLOSION_VIS);
-      expect(sizes).toContain(bossSize);
-    }
+    // Sheets are warmed at their DRAWN width, which is a whole strip.
+    const sheet = EXPLOSION_SHEETS[EXPLOSION_BOSS];
+    const sizes = PRELOAD_SPRITES.filter((s) => s.src === sheet).map((s) => s.w);
+    expect(sizes).toContain(EXPLOSION_VIS * EXPLOSION_FRAMES);
+    expect(sizes).toContain(EXPLOSION_VIS * EXPLOSION_BOSS_SCALE * EXPLOSION_FRAMES);
   });
 
   it('gives every hull sprite an explosion style to die in', () => {
     expect(EXPLOSION_FOR_SHIP).toHaveLength(ENEMY_SHIPS.length);
     for (let i = 0; i < ENEMY_SHIPS.length; i++) {
       const style = explosionForShip(i);
-      expect(EXPLOSIONS[style]).toBeDefined();
-      expect(EXPLOSIONS[style]).toHaveLength(EXPLOSION_FRAMES);
+      expect(EXPLOSION_SHEETS[style]).toBeDefined();
     }
     // The boss fireball is reserved — no ordinary hull dies in it, so the big
     // kill never looks like a large version of a small one.
@@ -71,8 +69,8 @@ describe('preload — the sprite warm list', () => {
 
   it('clamps an out-of-range hull index instead of returning undefined art', () => {
     // Older snapshots can carry a shipIdx from a shorter cast.
-    expect(EXPLOSIONS[explosionForShip(999)]).toBeDefined();
-    expect(EXPLOSIONS[explosionForShip(-1)]).toBeDefined();
+    expect(EXPLOSION_SHEETS[explosionForShip(999)]).toBeDefined();
+    expect(EXPLOSION_SHEETS[explosionForShip(-1)]).toBeDefined();
   });
 
   it('warms sprites at a real, positive render size', () => {
@@ -138,5 +136,44 @@ describe('preloadAssets', () => {
     await expect(pending).resolves.toBeUndefined();
     spy.mockRestore();
     jest.useRealTimers();
+  });
+});
+
+describe('explosion sheet geometry', () => {
+  // The renderer slices a sheet by translating it in whole frame-widths: frame
+  // N sits at x = N * (width / EXPLOSION_FRAMES). Nothing at runtime can detect
+  // a sheet that was packed with a different frame count — the animation just
+  // drifts sideways and shows slivers of two frames at once. So the packing is
+  // verified against the real files here.
+  const { readFileSync, readdirSync } = require('fs');
+  const { join } = require('path');
+  const DIR = join(__dirname, '..', '..', '..', 'assets', 'effects');
+
+  /** Width/height straight out of the PNG IHDR chunk. */
+  const png = (file: string) => {
+    const b = readFileSync(join(DIR, file));
+    expect(b.toString('ascii', 12, 16)).toBe('IHDR'); // a real PNG, not a stub
+    return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+  };
+
+  const sheets = readdirSync(DIR).filter((f: string) => f.endsWith('.png'));
+
+  it('ships one sheet per explosion style and nothing else', () => {
+    expect(sheets).toHaveLength(EXPLOSION_SHEETS.length);
+  });
+
+  it('packs exactly EXPLOSION_FRAMES square frames into every sheet', () => {
+    for (const file of sheets) {
+      const { w, h } = png(file);
+      // Square frames, so the strip is frames × height wide. An off-by-one in
+      // the pack shows up here rather than as a visual drift on device.
+      expect(w).toBe(h * EXPLOSION_FRAMES);
+      expect(w % EXPLOSION_FRAMES).toBe(0);
+    }
+  });
+
+  it('packs every sheet identically, so one style cannot drift from another', () => {
+    const dims = sheets.map((f: string) => JSON.stringify(png(f)));
+    expect(new Set(dims).size).toBe(1);
   });
 });

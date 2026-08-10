@@ -69,26 +69,37 @@ function filesUnder(dir: string): string[] {
 describe('assetBundlePatterns', () => {
   it('bundles every asset the game actually requires', () => {
     const required = requiredAssets();
-    // Sanity: the scan itself must be finding things, or this test proves nothing.
-    expect(required.length).toBeGreaterThan(100);
+    // Sanity: the scan itself must be finding things, or this test proves
+    // nothing. Deliberately loose — the count legitimately drops when art is
+    // consolidated (packing 60 explosion frames into 6 sheets moved it by 54).
+    expect(required.length).toBeGreaterThan(50);
     expect(required.filter((f) => !matches(f))).toEqual([]);
   });
 
-  it('keeps the pre-bake source art out of the shipping tree entirely', () => {
-    // The originals live in art-src/, not assets/ — see bake-bg-dim.mjs. That
-    // is what makes shipping them structurally impossible rather than a matter
-    // of remembering to exclude them, so guard the boundary itself.
-    const originals = filesUnder(join(ROOT, 'art-src', 'background'));
-    expect(originals.length).toBeGreaterThan(0);
-    expect(originals.filter(matches)).toEqual([]);
+  it('keeps every pre-bake source out of the shipping tree', () => {
+    // Sources live in art-src/, never assets/ — see bake-bg-dim.mjs and
+    // make-explosion-sheets.mjs. That boundary is what makes shipping them
+    // structurally impossible rather than a matter of remembering, so guard
+    // the boundary itself rather than any one directory.
+    const sources = filesUnder(join(ROOT, 'art-src'));
+    expect(sources.length).toBeGreaterThan(0);
+    expect(sources.filter(matches)).toEqual([]);
     expect(existsSync(join(ROOT, 'assets', 'background', 'original'))).toBe(false);
   });
 
-  it('has no subdirectories under assets/background to hide sources in', () => {
-    const stray = readdirSync(join(ROOT, 'assets', 'background')).filter((e) =>
-      statSync(join(ROOT, 'assets', 'background', e)).isDirectory()
-    );
-    expect(stray).toEqual([]);
+  it('has no subdirectories under assets/ for sources to hide in', () => {
+    // Every pattern is a single-level glob, so anything nested is silently
+    // unbundled — which is exactly how the explosion sheets first went missing.
+    // Keeping assets/ flat means the patterns cannot quietly stop covering it.
+    const nested: string[] = [];
+    for (const dir of readdirSync(join(ROOT, 'assets'))) {
+      const full = join(ROOT, 'assets', dir);
+      if (!statSync(full).isDirectory()) continue;
+      for (const entry of readdirSync(full)) {
+        if (statSync(join(full, entry)).isDirectory()) nested.push(`assets/${dir}/${entry}`);
+      }
+    }
+    expect(nested).toEqual([]);
   });
 
   it('still bundles the icons, which are referenced from app.json not code', () => {

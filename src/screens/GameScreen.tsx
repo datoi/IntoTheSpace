@@ -170,7 +170,7 @@ import {
   QUALITY_DROP_FRAC,
   QUALITY_RAISE_FRAC,
   PERF_OVERLAY,
-  EXPLOSIONS,
+  EXPLOSION_SHEETS,
   EXPLOSION_FRAMES,
   EXPLOSION_FPS,
   EXPLOSION_LIFE,
@@ -2719,9 +2719,15 @@ export default function GameScreen({
           <Image source={avatarImage} style={styles.jetImg} resizeMode="contain" fadeDuration={0} />
         </View>
         {/* Death fireballs, under the debris so sparks read in front of them.
-            Few enough to stay on React (MAX_EXPLOSIONS), and each is ONE Image
-            stepping its source — far less than the particle burst it replaced.
-            Keyed by id: a new explosion must mount fresh at frame 1 rather than
+            Few enough to stay on React (MAX_EXPLOSIONS).
+
+            Each is a CLIP the size of one frame, holding a strip of all ten
+            (see EXPLOSION_SHEETS). Stepping the animation slides the strip; the
+            `source` never changes. It used to swap source ten times per
+            explosion, which is a trip through the native image pipeline each
+            time and peaked at ~180 a second on the frame a formation died.
+
+            Keyed by id: a new explosion must mount fresh at frame 0 rather than
             inherit a recycled slot mid-animation. */}
         {s.explosions.map((e) => {
           const frame = Math.min(
@@ -2729,23 +2735,37 @@ export default function GameScreen({
             Math.floor(e.t * EXPLOSION_FPS)
           );
           return (
-            <Image
+            <View
               key={e.id}
-              source={EXPLOSIONS[e.style][frame]}
-              resizeMode="contain"
-              fadeDuration={0}
+              pointerEvents="none"
               style={{
                 position: 'absolute',
                 left: 0,
                 top: 0,
                 width: e.size,
                 height: e.size,
+                overflow: 'hidden', // the window that makes a strip a sprite
                 transform: [
                   { translateX: e.x - e.size / 2 },
                   { translateY: e.y - e.size / 2 },
                 ],
               }}
-            />
+            >
+              <Image
+                source={EXPLOSION_SHEETS[e.style]}
+                fadeDuration={0}
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  width: e.size * EXPLOSION_FRAMES,
+                  height: e.size,
+                  // A transform, NOT `left` — the whole point is that advancing
+                  // a frame must not re-run layout on the strip.
+                  transform: [{ translateX: -frame * e.size }],
+                }}
+              />
+            </View>
           );
         })}
         {/* A fixed pool of views; the loop fills the front slots. Rendered
