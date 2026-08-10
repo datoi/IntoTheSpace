@@ -1,7 +1,19 @@
 {
   "cli": { "version": ">= 12.0.0", "appVersionSource": "remote" },
   "build": {
-    "preview": { "distribution": "internal", "ios": { "simulator": true } },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": { "simulator": true }
+    },
+    "perf": {
+      "extends": "preview",
+      "env": {
+        "EXPO_PUBLIC_PERF_OVERLAY": "1"
+      }
+    },
     "production": { "autoIncrement": true }
   },
   "submit": { "production": {} }

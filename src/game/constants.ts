@@ -332,12 +332,19 @@ export const QUALITY_RAISE_FRAC = 0.05;
 /**
  * Show the on-screen frame-time readout.
  *
- * Flip to true to profile on a device — deliberately a plain constant rather
- * than `__DEV__`, because the numbers that matter come from a RELEASE build
- * (a dev build carries dev-mode React's overhead and would blame the wrong
- * thing). Off in anything shipped.
+ * Driven by the build, not by `__DEV__`: the numbers that matter come from a
+ * RELEASE build, because a dev build carries dev-mode React's overhead and
+ * would send you after a problem the shipped game does not have.
+ *
+ * Enabled by building the `perf` EAS profile, which sets this env var — so
+ * profiling never means editing source, and therefore never means remembering
+ * to edit it back before shipping. `EXPO_PUBLIC_` vars are inlined at build
+ * time, so this stays a compile-time constant and the dead branches vanish
+ * from a normal build exactly as they did when it was a literal.
+ *
+ *   npx eas build --profile perf --platform android
  */
-export const PERF_OVERLAY = false;
+export const PERF_OVERLAY = process.env.EXPO_PUBLIC_PERF_OVERLAY === '1';
 
 // --- Hearts (your health): every hit costs one, ❤️ pickups restore one ---
 export const HEARTS_START = 3;

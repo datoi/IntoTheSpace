@@ -404,7 +404,11 @@ describe('adaptive quality tiers', () => {
     expect(FRAME_BUDGET_MS).toBeLessThan(1000 / 30);
   });
 
-  it('ships with the profiler off', () => {
+  it('ships with the profiler off unless a build explicitly turns it on', () => {
+    // Opt-IN, never opt-out: the overlay is enabled only by the `perf` EAS
+    // profile setting EXPO_PUBLIC_PERF_OVERLAY. Nothing else may switch it on,
+    // so a normal build cannot accidentally ship a debug readout over the game.
+    expect(process.env.EXPO_PUBLIC_PERF_OVERLAY).toBeUndefined();
     expect(PERF_OVERLAY).toBe(false);
   });
 
