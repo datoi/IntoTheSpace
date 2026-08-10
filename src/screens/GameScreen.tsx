@@ -337,15 +337,6 @@ function enemyShotRender(
   return { angle: (Math.atan2(vx, -vy) * 180) / Math.PI, bw: box.w, bh: box.h };
 }
 
-// Enemies already claimed by other rockets in flight.
-function claimedTargets(bullets: Bullet[], self: Bullet): Set<number> {
-  const claimed = new Set<number>();
-  for (const o of bullets) {
-    if (o !== self && o.kind === 'rocket' && o.targetId !== undefined) claimed.add(o.targetId);
-  }
-  return claimed;
-}
-
 const SPACE_BLACK = PALETTE.void;
 
 // The play field's transform while nothing is shaking — which is nearly every
@@ -1959,6 +1950,19 @@ export default function GameScreen({
 
 
       const keptBullets: Bullet[] = [];
+      // Enemy ids rockets are currently locked onto.
+      //
+      // Built ONCE per frame and then maintained incrementally, rather than
+      // rebuilt per rocket. Re-locking only happens when a rocket's target has
+      // died — which is precisely what a bomb or a Nova does to a whole
+      // formation at once, so every rocket in flight re-locks on the same
+      // frame and a per-rocket rebuild made that O(rockets × bullets). The
+      // quadratic burst landed on the frame that was already the heaviest in
+      // the game.
+      //
+      // Lazy: a frame where nothing re-locks — almost all of them — never
+      // allocates the set at all.
+      let claimed: Set<number> | null = null;
       for (const b of s.bullets) {
         if (b.kind === 'rocket') {
           // Homing: steer toward the locked enemy while zigzagging.
@@ -1967,9 +1971,21 @@ export default function GameScreen({
             // Its target died: re-lock onto something no other rocket has
             // claimed, so a volley doesn't collapse onto one enemy as the
             // formation thins out. Fall back to the nearest if all are taken.
-            const claimed = claimedTargets(s.bullets, b);
+            if (!claimed) {
+              claimed = new Set<number>();
+              for (const o of s.bullets) {
+                if (o.kind === 'rocket' && o.targetId !== undefined) claimed.add(o.targetId);
+              }
+            }
+            // Drop this rocket's own (now dead) claim before asking, so it is
+            // never excluded from its own search — same semantics the old
+            // per-rocket rebuild got by passing `self`.
+            if (b.targetId !== undefined) claimed.delete(b.targetId);
             t = nearestHazard(s.cards, b.y, claimed) ?? nearestHazard(s.cards, b.y);
             b.targetId = t?.id;
+            // Publish the new lock so later rockets in THIS pass avoid it,
+            // exactly as they did when the set was rebuilt each time.
+            if (t) claimed.add(t.id);
           }
           const preX = b.x;
           if (t) b.x += (cardX(t) - b.x) * Math.min(8 * dt, 1);

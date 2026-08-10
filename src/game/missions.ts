@@ -328,11 +328,60 @@ function buildChallenges(
   return out;
 }
 
-export const dailyChallenges = (now: number): Quest[] =>
-  buildChallenges(DAILY_TEMPLATES, DAILY_COUNT, dayIndex(now), 60, undefined, dailyKey(now));
+/**
+ * A period's challenges, rebuilt from its stored KEY rather than a timestamp.
+ *
+ * The key is `d<dayIndex>` / `w<weekIndex>`, which is exactly the seed the
+ * generator uses — so a period that has already ended can be reconstructed
+ * long after its date has passed. That is what lets rollover see which of
+ * YESTERDAY's challenges the player finished (see refreshPeriods).
+ *
+ * Reconstructing from a timestamp would not be safe: dayIndex is computed from
+ * the LOCAL calendar date, so round-tripping an index back through a timestamp
+ * lands on the wrong day in any negative UTC offset.
+ */
+const indexOfKey = (key: string): number | null => {
+  const n = Number(key.slice(1));
+  return key.length > 1 && Number.isFinite(n) ? n : null;
+};
+
+export const dailyChallengesForKey = (key: string): Quest[] => {
+  const idx = indexOfKey(key);
+  return idx === null ? [] : buildChallenges(DAILY_TEMPLATES, DAILY_COUNT, idx, 60, undefined, key);
+};
+
+export const weeklyChallengesForKey = (key: string, baseline: Stats): Quest[] => {
+  const idx = indexOfKey(key);
+  return idx === null
+    ? []
+    : buildChallenges(WEEKLY_TEMPLATES, WEEKLY_COUNT, idx * 7919, 400, baseline, key);
+};
+
+// The live lists go through the SAME builder as the reconstruction above, so a
+// harvested reward can never disagree with the challenge the player was shown.
+export const dailyChallenges = (now: number): Quest[] => dailyChallengesForKey(dailyKey(now));
 
 export const weeklyChallenges = (now: number, baseline: Stats): Quest[] =>
-  buildChallenges(WEEKLY_TEMPLATES, WEEKLY_COUNT, weekIndex(now) * 7919, 400, baseline, weeklyKey(now));
+  weeklyChallengesForKey(weeklyKey(now), baseline);
+
+/**
+ * The challenges currently on offer, derived from the period's STORED KEY.
+ *
+ * This is what every caller should use, not the `now`-based lists above. The
+ * stored key is the single source of truth for which period the save is in, and
+ * refreshPeriods deliberately refuses to move it backwards (see the monotonic
+ * guard there). Generating the display list from `now` instead would disagree
+ * with the state the moment those two diverge — a device clock wound back would
+ * show yesterday's challenges while `claimed` still referred to today's, so
+ * every one of them would read as unclaimed again.
+ *
+ * `now` is only a fallback for a save whose period has never been rolled.
+ */
+export const liveDailyChallenges = (quests: QuestState, now: number): Quest[] =>
+  dailyChallengesForKey(quests.daily.key || dailyKey(now));
+
+export const liveWeeklyChallenges = (quests: QuestState, now: number, lifetime: Stats): Quest[] =>
+  weeklyChallengesForKey(quests.weekly.key || weeklyKey(now), quests.weekly.baseline ?? lifetime);
 
 // --- Login rewards -----------------------------------------------------------
 
@@ -359,8 +408,12 @@ export interface LoginState {
 
 export const FRESH_LOGIN: LoginState = { lastClaimedDay: -1, streak: 0 };
 
+// Strictly FORWARD, not merely "a different day". With `!==`, winding the
+// device clock back one day made today's already-collected reward claimable
+// again, repeatably. lastClaimedDay is itself the high-water mark, so a single
+// comparison closes it.
 export const canClaimLogin = (login: LoginState, now: number): boolean =>
-  login.lastClaimedDay !== dayIndex(now);
+  dayIndex(now) > login.lastClaimedDay;
 
 /**
  * Claim today's login reward.
@@ -371,7 +424,9 @@ export const canClaimLogin = (login: LoginState, now: number): boolean =>
  */
 export function claimLogin(login: LoginState, now: number): { login: LoginState; reward: Reward | null; day: number } {
   const today = dayIndex(now);
-  if (login.lastClaimedDay === today) return { login, reward: null, day: streakDay(login) };
+  // `<=`, not `===`: guards the same rollback canClaimLogin does, and this is
+  // the one that actually pays out, so it must not rely on the caller checking.
+  if (today <= login.lastClaimedDay) return { login, reward: null, day: streakDay(login) };
   const continued = login.lastClaimedDay === today - 1;
   const streak = continued ? login.streak + 1 : 1;
   const day = ((streak - 1) % LOGIN_CYCLE) + 1;
@@ -408,6 +463,24 @@ export interface QuestState {
   daily: PeriodState;
   weekly: PeriodState;
   login: LoginState;
+  /**
+   * Highest day / week index this save has ever seen.
+   *
+   * The high-water mark that stops a wound-back device clock resetting a period
+   * and re-opening rewards that were already collected. See refreshPeriods.
+   * Optional so older saves load unchanged — they adopt today's index on the
+   * first refresh.
+   */
+  maxDay?: number;
+  maxWeek?: number;
+  /**
+   * Rewards earned in a period that ended before the player collected them.
+   *
+   * Banked here at rollover and paid out by the app on the next render, rather
+   * than granted inside this module — missions.ts owns quest state and knows
+   * nothing about the wallet. Optional so older saves load unchanged.
+   */
+  pending?: Reward[];
 }
 
 const freshPeriod = (): PeriodState => ({ key: '', runBests: {}, claimed: [], baseline: null });
@@ -423,21 +496,88 @@ export const freshQuests = (): QuestState => ({
 // --- Period rollover ---------------------------------------------------------
 
 /**
+ * Most rewards a rollover may bank at once.
+ *
+ * A bound rather than a balance decision: pending only grows when a period
+ * ends with finished-but-uncollected work, which is at most a day's and a
+ * week's challenges. The cap exists so a corrupt or hand-edited save cannot
+ * grow this list without limit.
+ */
+const MAX_PENDING = 12;
+
+/**
+ * Rewards the player FINISHED but never collected before the period ended.
+ *
+ * Progress is discarded at rollover by design — that is what makes a challenge
+ * daily. An earned reward is a different thing: completing a daily at 23:00 and
+ * opening the app next morning used to destroy it silently, which reads as
+ * theft rather than as a deadline.
+ */
+function harvestEarned(period: PeriodState, offered: Quest[], lifetime: Stats): Reward[] {
+  const out: Reward[] = [];
+  for (const q of offered) {
+    if (period.claimed.includes(q.id)) continue;
+    if (isComplete(q.objective, lifetime, period.runBests, q.id)) out.push(q.reward);
+  }
+  return out;
+}
+
+/**
  * Roll the daily and weekly periods forward if the calendar has moved on.
  *
  * Called on load and after every run, so a session left open across midnight
  * still picks up the new day's challenges. Progress and claims for the old
- * period are discarded by design — that is what makes them daily.
+ * period are discarded by design — that is what makes them daily — but
+ * anything already EARNED is carried into `pending` first and paid out by the
+ * app rather than being thrown away with the progress.
  */
 export function refreshPeriods(quests: QuestState, lifetime: Stats, now: number): QuestState {
-  const dKey = dailyKey(now);
-  const wKey = weeklyKey(now);
+  // --- Monotonic calendar ---------------------------------------------------
+  // The period may only ever move FORWARD. Winding a device clock back a day
+  // otherwise changes the key, which resets `claimed`, which makes challenges
+  // the player already collected claimable all over again — repeatable for as
+  // long as they care to keep changing the clock.
+  //
+  // A forward jump is NOT preventable offline: nothing on the device can tell a
+  // real day passing from a clock set forward, so that is left alone (and is
+  // harmless while the game has no purchasable currency or leaderboard). This
+  // guard closes the half that IS decidable, which is also the half that lets
+  // the same reward be taken more than once.
+  const dIdx = dayIndex(now);
+  const wIdx = weekIndex(now);
+  const day = quests.maxDay === undefined ? dIdx : Math.max(dIdx, quests.maxDay);
+  const week = quests.maxWeek === undefined ? wIdx : Math.max(wIdx, quests.maxWeek);
+  const dKey = `d${day}`;
+  const wKey = `w${week}`;
   let out = quests;
+  // Recorded even when nothing rolled, so the high-water mark is durable — but
+  // only written when it actually moves, so an unchanged period still returns
+  // the very same object and callers can rely on reference equality.
+  if (out.maxDay !== day || out.maxWeek !== week) {
+    out = { ...out, maxDay: day, maxWeek: week };
+  }
+  const earned: Reward[] = [];
+
   if (out.daily.key !== dKey) {
+    // Only harvest a period that actually ran. A blank key is a fresh save, not
+    // a day the player lived through.
+    if (out.daily.key) {
+      earned.push(...harvestEarned(out.daily, dailyChallengesForKey(out.daily.key), lifetime));
+    }
     out = { ...out, daily: { key: dKey, runBests: {}, claimed: [], baseline: lifetime } };
   }
   if (out.weekly.key !== wKey) {
+    if (out.weekly.key) {
+      const base = out.weekly.baseline ?? lifetime;
+      earned.push(...harvestEarned(out.weekly, weeklyChallengesForKey(out.weekly.key, base), lifetime));
+    }
     out = { ...out, weekly: { key: wKey, runBests: {}, claimed: [], baseline: lifetime } };
+  }
+
+  if (earned.length) {
+    // Newest kept if the cap bites — an ancient unpaid reward matters less than
+    // the one the player earned last night.
+    out = { ...out, pending: [...(out.pending ?? []), ...earned].slice(-MAX_PENDING) };
   }
   return out;
 }
@@ -494,10 +634,10 @@ export function applyRun(quests: QuestState, lifetime: Stats, delta: StatDelta, 
   return {
     ...rolled,
     runBests: bestOf(rolled.runBests, [...MISSIONS, ...ACHIEVEMENTS, ...MILESTONES]),
-    daily: { ...rolled.daily, runBests: bestOf(rolled.daily.runBests, dailyChallenges(now)) },
+    daily: { ...rolled.daily, runBests: bestOf(rolled.daily.runBests, liveDailyChallenges(rolled, now)) },
     weekly: {
       ...rolled.weekly,
-      runBests: bestOf(rolled.weekly.runBests, weeklyChallenges(now, rolled.weekly.baseline ?? lifetime)),
+      runBests: bestOf(rolled.weekly.runBests, liveWeeklyChallenges(rolled, now, lifetime)),
     },
   };
 }
@@ -548,8 +688,8 @@ export function unclaimedCount(quests: QuestState, lifetime: Stats, now: number)
   };
   countIn([...ACHIEVEMENTS, ...MILESTONES], quests.claimed, quests.runBests);
   countIn(activeMissions(quests), quests.claimed, quests.runBests);
-  countIn(dailyChallenges(now), quests.daily.claimed, quests.daily.runBests);
-  countIn(weeklyChallenges(now, quests.weekly.baseline ?? lifetime), quests.weekly.claimed, quests.weekly.runBests);
+  countIn(liveDailyChallenges(quests, now), quests.daily.claimed, quests.daily.runBests);
+  countIn(liveWeeklyChallenges(quests, now, lifetime), quests.weekly.claimed, quests.weekly.runBests);
   if (canClaimLogin(quests.login, now)) n++;
   return n;
 }
@@ -588,11 +728,40 @@ function normalizePeriod(raw: unknown, normStats: (v: unknown) => Stats): Period
  * newer build's catalog (a player rolling back), and dropping them would let a
  * reward be claimed twice.
  */
+/** A whole integer, or undefined — for the optional high-water indices. */
+const optInt = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.floor(v) : undefined;
+
+/**
+ * Rewards banked by a rollover, kept only if they still look like rewards.
+ *
+ * These are the one part of quest state that is owed CURRENCY, so a malformed
+ * entry has to be dropped rather than passed to the wallet. Anything without a
+ * recognisable payload is discarded — a lost reward is a bad day, a corrupt
+ * balance is a broken save.
+ */
+function normalizePending(v: unknown): Reward[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: Reward[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const r = item as Record<string, unknown>;
+    const reward: Reward = {};
+    if (r.currencies && typeof r.currencies === 'object' && !Array.isArray(r.currencies)) {
+      reward.currencies = numRecord(r.currencies) as Price;
+    }
+    if (typeof r.ship === 'string') reward.ship = r.ship;
+    if (typeof r.background === 'string') reward.background = r.background;
+    if (reward.currencies || reward.ship || reward.background) out.push(reward);
+  }
+  return out.length ? out.slice(-MAX_PENDING) : undefined;
+}
+
 export function normalizeQuests(raw: unknown, normStats: (v: unknown) => Stats): QuestState {
   if (!raw || typeof raw !== 'object') return freshQuests();
   const r = raw as Record<string, unknown>;
   const login = r.login && typeof r.login === 'object' ? (r.login as Record<string, unknown>) : {};
-  return {
+  const out: QuestState = {
     claimed: strArray(r.claimed),
     runBests: numRecord(r.runBests),
     daily: normalizePeriod(r.daily, normStats),
@@ -606,4 +775,14 @@ export function normalizeQuests(raw: unknown, normStats: (v: unknown) => Stats):
         typeof login.streak === 'number' && Number.isFinite(login.streak) ? Math.max(0, Math.floor(login.streak)) : 0,
     },
   };
+  // Optional fields are only set when present, so a save that has never rolled
+  // a period round-trips to a state without them rather than gaining `undefined`
+  // keys — which is what lets the round-trip test compare by equality.
+  const maxDay = optInt(r.maxDay);
+  const maxWeek = optInt(r.maxWeek);
+  const pending = normalizePending(r.pending);
+  if (maxDay !== undefined) out.maxDay = maxDay;
+  if (maxWeek !== undefined) out.maxWeek = maxWeek;
+  if (pending !== undefined) out.pending = pending;
+  return out;
 }

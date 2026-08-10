@@ -23,9 +23,12 @@ import {
   activeMissions,
   applyRun,
   canClaimLogin,
+  FRESH_LOGIN,
+  liveDailyChallenges,
   claimLogin,
   claimQuest,
   dailyChallenges,
+  dailyChallengesForKey,
   dailyKey,
   dayIndex,
   describeObjective,
@@ -446,5 +449,170 @@ describe('normalizeQuests', () => {
   it('preserves a null weekly baseline instead of inventing one', () => {
     const out = normalizeQuests({ weekly: { key: 'w1', claimed: [], runBests: {}, baseline: null } }, norm);
     expect(out.weekly.baseline).toBeNull();
+  });
+});
+
+describe('period rollover — earned rewards survive, progress does not', () => {
+  const DAY = 86_400_000;
+  // 23:00 local, so "one hour later" is genuinely the next calendar day.
+  const lateEvening = new Date(2026, 0, 15, 23, 0, 0).getTime();
+  const nextMorning = new Date(2026, 0, 16, 9, 0, 0).getTime();
+
+  /** A state where one of today's dailies is finished but uncollected. */
+  const withFinishedDaily = () => {
+    let q = refreshPeriods(freshQuests(), {} as Stats, lateEvening);
+    const target = dailyChallenges(lateEvening).find((c) => c.objective.scope === 'run')!;
+    // Record a run good enough to complete it, without claiming.
+    q = { ...q, daily: { ...q.daily, runBests: { [target.id]: target.objective.target } } };
+    return { quests: q, target };
+  };
+
+  it('carries a completed-but-unclaimed daily across midnight', () => {
+    const { quests, target } = withFinishedDaily();
+    expect(isComplete(target.objective, {} as Stats, quests.daily.runBests, target.id)).toBe(true);
+
+    const rolled = refreshPeriods(quests, {} as Stats, nextMorning);
+    expect(rolled.pending ?? []).toContainEqual(target.reward);
+  });
+
+  it('still discards PROGRESS at rollover — that is what makes it daily', () => {
+    const { quests } = withFinishedDaily();
+    const rolled = refreshPeriods(quests, {} as Stats, nextMorning);
+    expect(rolled.daily.runBests).toEqual({});
+    expect(rolled.daily.claimed).toEqual([]);
+    expect(rolled.daily.key).not.toBe(quests.daily.key);
+  });
+
+  it('does not bank a reward the player already collected', () => {
+    const { quests, target } = withFinishedDaily();
+    const claimed = { ...quests, daily: { ...quests.daily, claimed: [target.id] } };
+    const rolled = refreshPeriods(claimed, {} as Stats, nextMorning);
+    expect(rolled.pending ?? []).toHaveLength(0);
+  });
+
+  it('does not bank a reward for a challenge that was never finished', () => {
+    const started = refreshPeriods(freshQuests(), {} as Stats, lateEvening);
+    const rolled = refreshPeriods(started, {} as Stats, nextMorning);
+    expect(rolled.pending ?? []).toHaveLength(0);
+  });
+
+  it('banks nothing on a first-ever load — a blank key is not a lived day', () => {
+    const rolled = refreshPeriods(freshQuests(), {} as Stats, lateEvening);
+    expect(rolled.pending ?? []).toHaveLength(0);
+  });
+
+  it('is a no-op within the same day, so pending cannot accumulate on re-entry', () => {
+    const { quests } = withFinishedDaily();
+    const same = refreshPeriods(quests, {} as Stats, lateEvening + 60_000);
+    expect(same).toBe(quests); // identical reference: nothing rolled
+  });
+
+  it('bounds the pending list against a save that never drains it', () => {
+    let q = refreshPeriods(freshQuests(), {} as Stats, lateEvening);
+    // Simulate many un-drained rollovers.
+    for (let d = 1; d < 40; d++) {
+      const target = dailyChallenges(lateEvening + (d - 1) * DAY).find(
+        (c) => c.objective.scope === 'run'
+      )!;
+      q = { ...q, daily: { ...q.daily, runBests: { [target.id]: target.objective.target } } };
+      q = refreshPeriods(q, {} as Stats, lateEvening + d * DAY);
+    }
+    expect((q.pending ?? []).length).toBeLessThanOrEqual(12);
+  });
+
+  it('rebuilds an ended period identically to what the player was shown', () => {
+    // The harvest reconstructs yesterday's challenges from the stored key. If
+    // that drifted from the live generator it would pay out rewards for
+    // challenges nobody was ever offered.
+    const key = dailyKey(lateEvening);
+    expect(dailyChallengesForKey(key)).toEqual(dailyChallenges(lateEvening));
+  });
+});
+
+describe('device-clock manipulation', () => {
+  const at = (y: number, m: number, d: number, h = 12) => new Date(y, m, d, h).getTime();
+  const today = at(2026, 2, 10);
+  const yesterday = at(2026, 2, 9);
+
+  describe('login streak', () => {
+    it('refuses a second claim after winding the clock back a day', () => {
+      const first = claimLogin(FRESH_LOGIN, today);
+      expect(first.reward).not.toBeNull();
+      // Clock rolled back — the same day's reward must not reopen.
+      expect(claimLogin(first.login, yesterday).reward).toBeNull();
+      expect(canClaimLogin(first.login, yesterday)).toBe(false);
+    });
+
+    it('refuses a rollback of many days, not just one', () => {
+      const first = claimLogin(FRESH_LOGIN, today);
+      expect(claimLogin(first.login, at(2025, 0, 1)).reward).toBeNull();
+    });
+
+    it('does not let a rollback inflate the streak', () => {
+      const day1 = claimLogin(FRESH_LOGIN, today);
+      const rolledBack = claimLogin(day1.login, yesterday);
+      expect(rolledBack.login.streak).toBe(day1.login.streak);
+    });
+
+    it('still pays a genuine next day', () => {
+      const day1 = claimLogin(FRESH_LOGIN, yesterday);
+      const day2 = claimLogin(day1.login, today);
+      expect(day2.reward).not.toBeNull();
+      expect(day2.login.streak).toBe(2);
+    });
+  });
+
+  describe('daily challenges', () => {
+    it('does not reset the period when the clock goes backwards', () => {
+      const q = refreshPeriods(freshQuests(), {} as Stats, today);
+      const target = dailyChallenges(today)[0];
+      const claimed = { ...q, daily: { ...q.daily, claimed: [target.id] } };
+
+      const rolledBack = refreshPeriods(claimed, {} as Stats, yesterday);
+      // Same period, so the claim stands and the reward cannot be taken twice.
+      expect(rolledBack.daily.key).toBe(q.daily.key);
+      expect(rolledBack.daily.claimed).toContain(target.id);
+    });
+
+    it('records a high-water day so the guard survives a reload', () => {
+      const q = refreshPeriods(freshQuests(), {} as Stats, today);
+      expect(q.maxDay).toBe(dayIndex(today));
+      // …and the mark does not regress.
+      expect(refreshPeriods(q, {} as Stats, yesterday).maxDay).toBe(dayIndex(today));
+    });
+
+    it('still rolls forward normally', () => {
+      const q = refreshPeriods(freshQuests(), {} as Stats, yesterday);
+      const next = refreshPeriods(q, {} as Stats, today);
+      expect(next.daily.key).not.toBe(q.daily.key);
+      expect(next.daily.claimed).toEqual([]);
+    });
+
+    it('shows the challenges belonging to the STORED period, not the wall clock', () => {
+      // Otherwise a wound-back clock would render yesterday's list while
+      // `claimed` still referred to today's, so everything looks unclaimed.
+      const q = refreshPeriods(freshQuests(), {} as Stats, today);
+      const rolledBack = refreshPeriods(q, {} as Stats, yesterday);
+      expect(liveDailyChallenges(rolledBack, yesterday)).toEqual(dailyChallenges(today));
+    });
+  });
+
+  it('persists the guard and any banked rewards through a save round-trip', () => {
+    // These are new optional fields; if normalizeQuests dropped them the guard
+    // would reset every launch and banked rewards would silently vanish.
+    let q = refreshPeriods(freshQuests(), {} as Stats, yesterday);
+    q = { ...q, pending: [{ currencies: { coins: 250 } }] };
+    const round = normalizeQuests(JSON.parse(JSON.stringify(q)), norm);
+    expect(round.maxDay).toBe(q.maxDay);
+    expect(round.maxWeek).toBe(q.maxWeek);
+    expect(round.pending).toEqual([{ currencies: { coins: 250 } }]);
+  });
+
+  it('drops a malformed banked reward rather than paying it', () => {
+    const round = normalizeQuests(
+      { ...freshQuests(), pending: [null, 'coins', { nonsense: 1 }, { currencies: { coins: 10 } }] },
+      norm
+    );
+    expect(round.pending).toEqual([{ currencies: { coins: 10 } }]);
   });
 });

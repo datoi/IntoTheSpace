@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -8,6 +8,7 @@ import { HangarScreen, StatsScreen } from './src/screens/Progress';
 import { QuestsScreen } from './src/screens/Quests';
 import LoadingScreen from './src/screens/LoadingScreen';
 import { AmbientParallax } from './src/components/Parallax';
+import { RunBoundary } from './src/components/RunBoundary';
 import {
   loadSave,
   writeSave,
@@ -48,6 +49,10 @@ const DEV_UNLOCK_ALL = __DEV__ && process.env.NODE_ENV !== 'test';
 export default function App() {
   const [phase, setPhase] = useState<GamePhase>('menu');
   const [save, setSave] = useState<SaveData>({ ...DEFAULT_SAVE });
+  // The authoritative save between renders. `save` drives the UI; this is what
+  // mutation handlers read, so several of them in one event batch each see the
+  // previous one's result instead of the render's stale copy. See persist().
+  const saveRef = useRef<SaveData>(save);
   const [result, setResult] = useState<RunResult>({
     coins: 0,
     score: 0,
@@ -95,10 +100,13 @@ export default function App() {
       // Roll the daily/weekly periods forward at boot as well as after a run,
       // so opening the app on a new day shows that day's challenges rather than
       // yesterday's finished ones.
-      setSave({
+      const loaded: SaveData = {
         ...savedData,
         quests: refreshPeriods(savedData.quests, savedData.stats, Date.now()),
-      });
+      };
+      // The ref has to move with the state — it is what every handler reads.
+      saveRef.current = loaded;
+      setSave(loaded);
       setPausedRun(run);
       await preloadAssets((done, total) => {
         if (alive) setProgress(total ? done / total : 1);
@@ -131,7 +139,29 @@ export default function App() {
     clearRun();
   }, []);
 
-  const persist = useCallback((next: SaveData) => {
+  /**
+   * Apply an update to the save, then store it.
+   *
+   * Takes an UPDATER, not a finished value, and this is load-bearing. Every
+   * mutation handler used to close over `save` and hand back a whole rebuilt
+   * object. Two of them firing in one event batch — two fingers landing
+   * together on the upgrade screen, or a fast tap pair — both read the same
+   * stale `save`, so the second overwrote the first: one purchase silently
+   * vanished, uncharged and unapplied. It also meant two writeSave calls with
+   * divergent payloads racing each other to disk.
+   *
+   * `saveRef` is what fixes it: it is advanced SYNCHRONOUSLY here, before
+   * setSave has re-rendered anything, so the second call in a batch reads the
+   * first one's result rather than the render's stale copy.
+   *
+   * Returning `prev` unchanged means "declined" — maxed out, can't afford,
+   * already owned — and costs neither a render nor a disk write.
+   */
+  const persist = useCallback((update: (prev: SaveData) => SaveData) => {
+    const prev = saveRef.current;
+    const next = update(prev);
+    if (next === prev) return;
+    saveRef.current = next;
     setSave(next);
     writeSave(next);
   }, []);
@@ -147,30 +177,31 @@ export default function App() {
       // "New best" now means a better SCORE — the thing that measures how the
       // run was played. `save.best` still tracks altitude, so existing players'
       // records and every altitude-based objective keep working unchanged.
-      const newBest = r.score > save.stats.bestScore;
-      setIsNewBest(newBest);
-      // Bank the run: distance into `best`, every currency into the wallet, and
-      // the run's counters into lifetime stats.
-      const banked = earn(save, {
-        coins: r.coins,
-        crystals: r.crystals,
-        chips: r.chips,
-        alloy: r.alloy,
-      });
-      const stats = addStats(save.stats, r.stats);
-      persist({
-        ...banked,
-        best: Math.max(save.best, r.altitude), // best = highest distance reached
-        stats,
-        // Quest progress is folded against the UPDATED lifetime stats, so a
-        // goal finished by this very run reads as complete immediately rather
-        // than only after the next one.
-        quests: applyRun(save.quests, stats, r.stats, Date.now()),
+      setIsNewBest(r.score > saveRef.current.stats.bestScore);
+      persist((prev) => {
+        // Bank the run: distance into `best`, every currency into the wallet,
+        // and the run's counters into lifetime stats.
+        const banked = earn(prev, {
+          coins: r.coins,
+          crystals: r.crystals,
+          chips: r.chips,
+          alloy: r.alloy,
+        });
+        const stats = addStats(prev.stats, r.stats);
+        return {
+          ...banked,
+          best: Math.max(prev.best, r.altitude), // best = highest distance reached
+          stats,
+          // Quest progress is folded against the UPDATED lifetime stats, so a
+          // goal finished by this very run reads as complete immediately rather
+          // than only after the next one.
+          quests: applyRun(prev.quests, stats, r.stats, Date.now()),
+        };
       });
       discardRun(); // the run is over — nothing to resume
       setPhase('gameover');
     },
-    [save, persist, discardRun]
+    [persist, discardRun]
   );
 
   /**
@@ -182,65 +213,73 @@ export default function App() {
    */
   const buyUpgrade = useCallback(
     (kind: UpgradeKind) => {
-      const shipId = save.selectedAvatar;
-      if (isMaxed(save.upgrades, shipId, kind)) return;
-      const level = levelOf(save.upgrades, shipId, kind);
-      const price = upgradeCost(kind, level);
-      if (!DEV_UNLOCK_ALL && !affords(save, price)) return;
-      const paid = DEV_UNLOCK_ALL ? save : spend(save, price);
-      persist({
-        ...paid,
-        upgrades: withLevel(save.upgrades, shipId, kind, level + 1),
-        stats: addStats(save.stats, { upgradesBought: 1 }),
+      persist((prev) => {
+        const shipId = prev.selectedAvatar;
+        if (isMaxed(prev.upgrades, shipId, kind)) return prev;
+        const level = levelOf(prev.upgrades, shipId, kind);
+        const price = upgradeCost(kind, level);
+        if (!DEV_UNLOCK_ALL && !affords(prev, price)) return prev;
+        const paid = DEV_UNLOCK_ALL ? prev : spend(prev, price);
+        return {
+          ...paid,
+          upgrades: withLevel(prev.upgrades, shipId, kind, level + 1),
+          stats: addStats(prev.stats, { upgradesBought: 1 }),
+        };
       });
     },
-    [save, persist]
+    [persist]
   );
 
   const buyAvatar = useCallback(
     (id: string) => {
-      const def = AVATARS.find((a) => a.id === id);
-      if (!def || save.unlocked.includes(id)) return;
-      if (!DEV_UNLOCK_ALL && save.likes < def.price) return;
-      persist({
-        ...save,
-        likes: DEV_UNLOCK_ALL ? save.likes : save.likes - def.price,
-        unlocked: [...save.unlocked, id],
-        selectedAvatar: id,
+      persist((prev) => {
+        const def = AVATARS.find((a) => a.id === id);
+        if (!def || prev.unlocked.includes(id)) return prev;
+        if (!DEV_UNLOCK_ALL && prev.likes < def.price) return prev;
+        return {
+          ...prev,
+          likes: DEV_UNLOCK_ALL ? prev.likes : prev.likes - def.price,
+          unlocked: [...prev.unlocked, id],
+          selectedAvatar: id,
+        };
       });
     },
-    [save, persist]
+    [persist]
   );
 
   const selectAvatar = useCallback(
     (id: string) => {
-      if (!save.unlocked.includes(id)) return;
-      persist({ ...save, selectedAvatar: id });
+      persist((prev) =>
+        prev.unlocked.includes(id) ? { ...prev, selectedAvatar: id } : prev
+      );
     },
-    [save, persist]
+    [persist]
   );
 
   const buyBackground = useCallback(
     (id: string) => {
-      const def = BACKGROUNDS.find((b) => b.id === id);
-      if (!def || save.unlockedBackgrounds.includes(id)) return;
-      if (!DEV_UNLOCK_ALL && save.likes < def.price) return;
-      persist({
-        ...save,
-        likes: DEV_UNLOCK_ALL ? save.likes : save.likes - def.price,
-        unlockedBackgrounds: [...save.unlockedBackgrounds, id],
-        selectedBackground: id,
+      persist((prev) => {
+        const def = BACKGROUNDS.find((b) => b.id === id);
+        if (!def || prev.unlockedBackgrounds.includes(id)) return prev;
+        if (!DEV_UNLOCK_ALL && prev.likes < def.price) return prev;
+        return {
+          ...prev,
+          likes: DEV_UNLOCK_ALL ? prev.likes : prev.likes - def.price,
+          unlockedBackgrounds: [...prev.unlockedBackgrounds, id],
+          selectedBackground: id,
+        };
       });
     },
-    [save, persist]
+    [persist]
   );
 
   const selectBackground = useCallback(
     (id: string) => {
-      if (!save.unlockedBackgrounds.includes(id)) return;
-      persist({ ...save, selectedBackground: id });
+      persist((prev) =>
+        prev.unlockedBackgrounds.includes(id) ? { ...prev, selectedBackground: id } : prev
+      );
     },
-    [save, persist]
+    [persist]
   );
 
   /**
@@ -268,18 +307,47 @@ export default function App() {
       // claimQuest re-checks completion and prior claims itself, so a stale
       // screen tapping an already-collected reward is a no-op rather than a
       // second payout.
-      const { quests, reward } = claimQuest(save.quests, quest, save.stats, bucket);
-      if (!reward) return;
-      persist({ ...grant(save, reward), quests });
+      persist((prev) => {
+        const { quests, reward } = claimQuest(prev.quests, quest, prev.stats, bucket);
+        if (!reward) return prev;
+        return { ...grant(prev, reward), quests };
+      });
     },
-    [save, persist, grant]
+    [persist, grant]
   );
 
+  /**
+   * Pay out rewards banked by a period rollover.
+   *
+   * A daily finished at 23:00 and left uncollected used to be destroyed at
+   * midnight. refreshPeriods now carries the EARNED ones into quests.pending
+   * (it cannot pay them itself — missions.ts owns quest state, not the wallet),
+   * and this drains that buffer.
+   *
+   * Granting and clearing happen inside ONE persist call, so the two can never
+   * come apart: if this effect runs twice, the second pass reads an already
+   * empty list and declines. Buffering in the save rather than granting at the
+   * moment of rollover also means a crash between the two cannot lose the
+   * reward — it is still there on the next launch.
+   */
+  useEffect(() => {
+    if (!save.quests.pending?.length) return;
+    persist((prev) => {
+      const pending = prev.quests.pending ?? [];
+      if (!pending.length) return prev;
+      let next = prev;
+      for (const reward of pending) next = grant(next, reward);
+      return { ...next, quests: { ...next.quests, pending: [] } };
+    });
+  }, [save.quests.pending, persist, grant]);
+
   const claimDailyLogin = useCallback(() => {
-    const { login, reward } = claimLogin(save.quests.login, Date.now());
-    if (!reward) return; // already claimed today
-    persist({ ...grant(save, reward), quests: { ...save.quests, login } });
-  }, [save, persist, grant]);
+    persist((prev) => {
+      const { login, reward } = claimLogin(prev.quests.login, Date.now());
+      if (!reward) return prev; // already claimed today
+      return { ...grant(prev, reward), quests: { ...prev.quests, login } };
+    });
+  }, [persist, grant]);
 
   // Dev browse mode shows a full wallet so everything reads affordable. This is
   // display-only — `save` (what gets persisted) keeps the real balance.
@@ -334,21 +402,30 @@ export default function App() {
         />
       )}
       {phase === 'playing' && (
-        <GameScreen
-          key={runId}
-          best={save.best}
-          avatarImage={avatarImage}
-          avatarShot={selectedAvatar.shot}
-          avatarSpecial={selectedAvatar.special}
-          shipStats={shipStats}
-          background={selectedBackground.set}
-          resume={pausedRun}
-          startPaused={!!pausedRun}
-          onGameOver={handleGameOver}
-          onPersist={persistRun}
-          onClearRun={discardRun}
+        // A run that fails must never cost more than the run — see RunBoundary.
+        // Keyed with the run so a fresh LIFT OFF always gets a clean boundary
+        // rather than inheriting the failed state of the previous attempt.
+        <RunBoundary
+          key={`boundary-${runId}`}
+          onDiscardRun={discardRun}
           onHome={() => setPhase('menu')}
-        />
+        >
+          <GameScreen
+            key={runId}
+            best={save.best}
+            avatarImage={avatarImage}
+            avatarShot={selectedAvatar.shot}
+            avatarSpecial={selectedAvatar.special}
+            shipStats={shipStats}
+            background={selectedBackground.set}
+            resume={pausedRun}
+            startPaused={!!pausedRun}
+            onGameOver={handleGameOver}
+            onPersist={persistRun}
+            onClearRun={discardRun}
+            onHome={() => setPhase('menu')}
+          />
+        </RunBoundary>
       )}
       {phase === 'gameover' && (
         <GameOverScreen

@@ -279,11 +279,73 @@ export async function writeSave(data: SaveData): Promise<void> {
 }
 
 // --- In-progress run (for pause / resume-after-close) ---
+
+/**
+ * Every field of GameState that the loop ITERATES rather than reads.
+ *
+ * These are the ones that turn a bad snapshot into a crash: GameScreen resumes
+ * with `{ ...freshRunState(stats), ...resume }`, which only backfills keys that
+ * are ABSENT. A key present as `null` overwrites the fresh array, and the first
+ * `for (const c of s.cards)` throws out of the loop with nothing to catch it.
+ */
+const RUN_ARRAYS = [
+  'novaHits',
+  'coinQueue',
+  'spearQueue',
+  'bullets',
+  'enemyBullets',
+  'cards',
+  'particles',
+  'explosions',
+  'floats',
+] as const;
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * Make a stored snapshot safe to spread over a fresh run state.
+ *
+ * loadSave has always run migrate + normalizeSave; loadRun was a bare
+ * `JSON.parse(raw) as GameState`, which is a cast, not a check. The asymmetry
+ * mattered because of the failure mode rather than the likelihood: persistRun
+ * only ever writes a valid deep copy, so this needs storage corruption or a
+ * build that wrote a different shape — but the result was an uncaught throw out
+ * of render on every launch, and the bad snapshot is re-read each time. An
+ * unrecoverable boot loop is worth a few lines of coercion.
+ *
+ * Deliberately NOT a full schema check. Dropping null/undefined lets the
+ * caller's spread fall back to the fresh value for anything missing, which
+ * covers every scalar at once; only the containers need an explicit type test,
+ * because those are what get iterated.
+ */
+export function normalizeRun(raw: unknown): GameState | null {
+  if (!isPlainObject(raw)) return null;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    // Absent beats present-and-null: the spread then supplies the real default.
+    if (v === null || v === undefined) continue;
+    out[k] = v;
+  }
+  for (const key of RUN_ARRAYS) {
+    if (!Array.isArray(out[key])) delete out[key];
+  }
+  if (!isPlainObject(out.boons)) delete out.boons;
+  return out as unknown as GameState;
+}
+
 export async function loadRun(): Promise<GameState | null> {
   try {
     const raw = await AsyncStorage.getItem(RUN_KEY);
-    return raw ? (JSON.parse(raw) as GameState) : null;
+    if (!raw) return null;
+    const run = normalizeRun(JSON.parse(raw));
+    // A payload we cannot make sense of is discarded rather than left to be
+    // re-read (and re-fail) on every future launch.
+    if (!run) await clearRun();
+    return run;
   } catch {
+    // Unparseable JSON — same reasoning: drop it so the next boot is clean.
+    await clearRun();
     return null;
   }
 }

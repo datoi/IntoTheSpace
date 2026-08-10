@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadSave, writeSave, loadRun, saveRun, clearRun, DEFAULT_SAVE, SaveData } from '../storage';
 import { GameState } from '../types';
 import { freshRunState } from '../runstate';
+import { resolveShipStats } from '../upgrades';
 
 const SAVE_KEY = 'doomscroll:save:v1';
 // Must match storage.ts — if the versioned key there moves again, the
@@ -182,5 +183,66 @@ describe('run snapshots', () => {
     await Promise.all([saveRun(a), saveRun(b)]);
     // AsyncStorage serializes ops in call order; the later call must win.
     expect((await loadRun())!.coins).toBe(2);
+  });
+});
+
+describe('loadRun — a bad snapshot must not brick the app', () => {
+  // loadSave has always migrated and normalized; loadRun was a bare cast. The
+  // asymmetry mattered for the OUTCOME rather than the odds: an explicit null
+  // survives the `{ ...freshRunState(), ...resume }` merge in GameScreen (which
+  // only backfills ABSENT keys), the loop then iterates it, and the throw
+  // escapes render. The same snapshot is re-read every launch, so it is a boot
+  // loop with no way out.
+  const RUN_KEY = 'doomscroll:run:v4';
+
+  it('drops a null collection so the fresh default survives the merge', async () => {
+    // The exact payload from the QA report.
+    await AsyncStorage.setItem(RUN_KEY, JSON.stringify({ hearts: 3, cards: null, bullets: null }));
+    const run = await loadRun();
+    expect(run).not.toBeNull();
+    expect('cards' in (run as object)).toBe(false);
+    expect('bullets' in (run as object)).toBe(false);
+    // …and the field that was fine is kept.
+    expect((run as { hearts: number }).hearts).toBe(3);
+  });
+
+  it('drops a collection stored as the wrong type', async () => {
+    await AsyncStorage.setItem(
+      RUN_KEY,
+      JSON.stringify({ cards: 'nope', enemyBullets: 42, floats: {}, boons: [] })
+    );
+    const run = (await loadRun()) as unknown as Record<string, unknown>;
+    for (const key of ['cards', 'enemyBullets', 'floats', 'boons']) {
+      expect(key in run).toBe(false);
+    }
+  });
+
+  it('keeps a genuinely valid snapshot untouched', async () => {
+    const good = freshRunState(resolveShipStats({}, 'ironclad'));
+    await AsyncStorage.setItem(RUN_KEY, JSON.stringify(good));
+    const run = await loadRun();
+    expect(run).toEqual(JSON.parse(JSON.stringify(good)));
+  });
+
+  it('discards a scalar payload rather than resuming into it', async () => {
+    await AsyncStorage.setItem(RUN_KEY, '42');
+    expect(await loadRun()).toBeNull();
+  });
+
+  it('discards unparseable JSON', async () => {
+    await AsyncStorage.setItem(RUN_KEY, '{not json');
+    expect(await loadRun()).toBeNull();
+  });
+
+  it('CLEARS a snapshot it had to reject, so the next launch is clean', async () => {
+    // Without this the same bad payload is read and rejected on every boot.
+    await AsyncStorage.setItem(RUN_KEY, '{not json');
+    await loadRun();
+    expect(await AsyncStorage.getItem(RUN_KEY)).toBeNull();
+  });
+
+  it('treats an array payload as garbage, not as an object', async () => {
+    await AsyncStorage.setItem(RUN_KEY, JSON.stringify([1, 2, 3]));
+    expect(await loadRun()).toBeNull();
   });
 });

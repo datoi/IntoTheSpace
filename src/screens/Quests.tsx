@@ -19,13 +19,13 @@ import {
   Reward,
   activeMissions,
   canClaimLogin,
-  dailyChallenges,
+  liveDailyChallenges,
   isComplete,
   loginReward,
   missionsCompleted,
   nextLoginDay,
   progressOf,
-  weeklyChallenges,
+  liveWeeklyChallenges,
 } from '../game/missions';
 import { FONTS } from '../game/type';
 import CoinIcon from '../components/Coin';
@@ -207,8 +207,11 @@ export function QuestsScreen({ save, now = Date.now(), onClaim, onClaimLogin, on
   const [tab, setTab] = useState<Tab>('missions');
   const { quests } = save;
 
-  const daily = dailyChallenges(now);
-  const weekly = weeklyChallenges(now, quests.weekly.baseline ?? save.stats);
+  // Derived from the period's stored key, not from `now` — see
+  // liveDailyChallenges. The two diverge if a device clock is wound back, and
+  // the list on screen must match the one `claimed` refers to.
+  const daily = liveDailyChallenges(quests, now);
+  const weekly = liveWeeklyChallenges(quests, now, save.stats);
   const missions = activeMissions(quests);
 
   const tabs: { id: Tab; label: string }[] = [
