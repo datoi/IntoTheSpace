@@ -81,7 +81,7 @@ const renderGame = async (resume?: GameState, extra: Record<string, unknown> = {
   await render(
     <GameScreen
       best={0}
-      avatarImage={AVATARS[0].levels[0]}
+      avatarImage={AVATARS[0].image}
       avatarShot={AVATARS[0].shot}
       avatarSpecial={AVATARS[0].special}
       shipStats={BASE_SHIP_STATS}
