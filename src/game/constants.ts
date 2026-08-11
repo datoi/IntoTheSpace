@@ -737,10 +737,21 @@ export const enemyShotFor = (arch: ArchKind | undefined): number | undefined =>
 // • "SBS Seamless Space Backgrounds" sets: square 512 tiles, genuinely
 //   seamless → tiled plainly. No static base; the nebula tile itself is the
 //   slowest opaque layer, with two shared starfield tiles above it.
-interface BgLayer {
+export interface BgLayer {
   src: number;
   speed: number;
   alpha: number;
+  /**
+   * Tile shape overrides, for a layer whose art is not the same proportion as
+   * the rest of its set.
+   *
+   * The star veil is a square seamless tile shared by every sky, but the
+   * spbg sets tile at 16:9 — without an override the veil would be stretched
+   * to that and every star drawn as a short vertical streak. Each layer wraps
+   * on its OWN period (see layerPeriod), so mixing shapes in one set is safe.
+   */
+  aspect?: number;
+  mirror?: boolean;
 }
 // A distant planet at a fixed horizontal spot in the sky. Its size encodes
 // distance: a big, opaque planet reads as near; a small, fainter one as far.
@@ -764,7 +775,14 @@ export interface BgSet {
   planet?: PlanetLayer; // optional far planet drifting through this sky
 }
 
-export const PLANET_SPEED = 0.08; // parallax speed — slow, well below the near layers
+/**
+ * How fast the planet field drifts, against the star veil's 0.45.
+ *
+ * The GAP between the two is the depth cue. A planet has to be visibly
+ * overtaken by the stars in front of it; at similar speeds the veil merely
+ * covers it and the eye reads both as being the same distance away.
+ */
+export const PLANET_SPEED = 0.05;
 export const PLANET_SPACING = SCREEN.H * 0.58; // vertical gap between planets → 2+ on screen at once
 
 // Planet sprites (SBS 2D Planet Pack, shaded 512 → 256).
@@ -784,6 +802,47 @@ const PLANET_BLUEGIANT = require('../../assets/background/planet_bluegiant.png')
 const PLANET_LUSH = require('../../assets/background/planet_lush.png');
 const PLANET_ICY = require('../../assets/background/planet_icy.png');
 
+// --- The star veil ------------------------------------------------------------
+//
+// A sparse field of stars with REAL per-pixel alpha, drawn in FRONT of the
+// planets and drifting far faster than they do. Built by
+// scripts/make-star-veil.mjs from the pack's own starfields, whose alpha is
+// either absent or unusable — sbs_stars_near.png is fully opaque, so drawing it
+// over anything would black the sky out.
+//
+// This layer exists for one reason: OCCLUSION. Planets read as stickers on the
+// lens when nothing ever passes between them and the player, and no amount of
+// shrinking or fading fixes that, because it is not the cue the eye uses.
+// Reordering the old layers could not fix it either — they are opaque, so a
+// planet moved behind them is not distant, it is gone. Something transparent
+// has to be in front, and until now nothing was.
+//
+// ONE file for every sky: stars are white and need not match the nebula behind
+// them, so this is a single bitmap and a single decode rather than one per set.
+const STAR_VEIL = require('../../assets/background/star_veil.png');
+
+/**
+ * The veil as a layer. A square seamless tile, so it overrides the tile shape
+ * of any set that is not square (see BgLayer.aspect) rather than being
+ * stretched into vertical streaks.
+ *
+ * Drawn at group alpha 1, carrying its own per-pixel alpha: a group opacity
+ * below 1 asks the platform for an offscreen compositing buffer every frame,
+ * where per-pixel alpha is free and looks better — each star keeps its own
+ * brightness instead of all of them being faded by the same amount.
+ *
+ * The SPEED is the whole point. At 0.45 against PLANET_SPEED's 0.05 it visibly
+ * overtakes the planets; a veil drifting at their pace would occlude them
+ * without ever reading as nearer.
+ */
+const veilLayer = (): BgLayer => ({
+  src: STAR_VEIL,
+  speed: 0.45,
+  alpha: 1,
+  aspect: 1,
+  mirror: false,
+});
+
 const SPBG_ASPECT = 1280 / 720;
 const spbgSet = (base: number, far: number, mid: number, near: number): BgSet => ({
   base,
@@ -800,7 +859,11 @@ const spbgSet = (base: number, far: number, mid: number, near: number): BgSet =>
   // therefore the one that reads as a backdrop rather than as motion. These sets
   // still have their static `base` behind it, so losing two layers costs depth
   // rather than content.
-  layers: [{ src: far, speed: 0.2, alpha: 0.4 }],
+  // The far layer, then the VEIL. ParallaxBackground draws the planet field
+  // between the last two layers, so a second layer here is what finally puts
+  // the planets behind something — with one layer they were always in front of
+  // everything, which is exactly why they read as pasted on.
+  layers: [{ src: far, speed: 0.2, alpha: 0.4 }, veilLayer()],
 });
 
 // Shared SBS starfield tiles (opaque black — partial alpha lets the nebula
@@ -816,7 +879,7 @@ const sbsSet = (nebula: number): BgSet => ({
   // Just the nebula — see the note in spbgSet. It is both the slowest layer
   // (speed 0.15) and the one carrying the set's colour, and unlike the spbg sets
   // these have no static base behind them, so it has to be the opaque one.
-  layers: [{ src: nebula, speed: 0.15, alpha: 1 }],
+  layers: [{ src: nebula, speed: 0.15, alpha: 1 }, veilLayer()],
 });
 
 // --- Backgrounds: one environment is shown for the whole run; the player
@@ -847,13 +910,16 @@ export const BACKGROUNDS: BackgroundDef[] = [
       // and it happens to be the layer the background is named for. Raised to
       // full alpha now that there are no starfields underneath for it to let
       // through; at 0.6 over bare void it would have read as washed out.
-      layers: [{ src: SBS_PURPLE, speed: 0.15, alpha: 1 }],
+      // Spelled out rather than using sbsSet, but it still needs the veil — the
+      // planets have to have something in front of them or they read as pasted
+      // on, and this is the STARTER sky, so it is the first one anyone sees.
+      layers: [{ src: SBS_PURPLE, speed: 0.15, alpha: 1 }, veilLayer()],
       // Warm/neutral worlds against the cool violet haze.
       planet: {
         items: [
-          { src: PLANET_REDGIANT, xFrac: 0.68, sizeFrac: 0.46, opacity: 1 }, // near
-          { src: PLANET_LUNAR, xFrac: 0.3, sizeFrac: 0.22, opacity: 0.78 }, // far
-          { src: PLANET_ARID, xFrac: 0.6, sizeFrac: 0.33, opacity: 0.9 }, // mid
+          { src: PLANET_REDGIANT, xFrac: 0.68, sizeFrac: 0.21, opacity: 0.55 }, // near
+          { src: PLANET_LUNAR, xFrac: 0.3, sizeFrac: 0.1, opacity: 0.43 }, // far
+          { src: PLANET_ARID, xFrac: 0.6, sizeFrac: 0.15, opacity: 0.5 }, // mid
         ],
       },
     },
@@ -868,9 +934,9 @@ export const BACKGROUNDS: BackgroundDef[] = [
       ...sbsSet(SBS_BLUE),
       planet: {
         items: [
-          { src: PLANET_ORANGE, xFrac: 0.28, sizeFrac: 0.44, opacity: 1 }, // near
-          { src: PLANET_MAGMA, xFrac: 0.7, sizeFrac: 0.24, opacity: 0.82 }, // far
-          { src: PLANET_BARREN, xFrac: 0.45, sizeFrac: 0.32, opacity: 0.9 }, // mid
+          { src: PLANET_ORANGE, xFrac: 0.28, sizeFrac: 0.2, opacity: 0.55 }, // near
+          { src: PLANET_MAGMA, xFrac: 0.7, sizeFrac: 0.11, opacity: 0.45 }, // far
+          { src: PLANET_BARREN, xFrac: 0.45, sizeFrac: 0.14, opacity: 0.5 }, // mid
         ],
       },
     },
@@ -890,9 +956,9 @@ export const BACKGROUNDS: BackgroundDef[] = [
       // Bright worlds, brilliant against the near-black void.
       planet: {
         items: [
-          { src: PLANET_TERRESTRIAL, xFrac: 0.68, sizeFrac: 0.48, opacity: 1 }, // near
-          { src: PLANET_OCEAN, xFrac: 0.3, sizeFrac: 0.24, opacity: 0.85 }, // far
-          { src: PLANET_YELLOWGIANT, xFrac: 0.55, sizeFrac: 0.34, opacity: 0.95 }, // mid
+          { src: PLANET_TERRESTRIAL, xFrac: 0.68, sizeFrac: 0.22, opacity: 0.55 }, // near
+          { src: PLANET_OCEAN, xFrac: 0.3, sizeFrac: 0.11, opacity: 0.47 }, // far
+          { src: PLANET_YELLOWGIANT, xFrac: 0.55, sizeFrac: 0.15, opacity: 0.52 }, // mid
         ],
       },
     },
@@ -912,9 +978,9 @@ export const BACKGROUNDS: BackgroundDef[] = [
       // Cool icy worlds contrasting the warm ember wisps.
       planet: {
         items: [
-          { src: PLANET_GLACIAL, xFrac: 0.3, sizeFrac: 0.46, opacity: 1 }, // near
-          { src: PLANET_AQUAMARINE, xFrac: 0.7, sizeFrac: 0.24, opacity: 0.82 }, // far
-          { src: PLANET_BLUEGIANT, xFrac: 0.5, sizeFrac: 0.33, opacity: 0.9 }, // mid
+          { src: PLANET_GLACIAL, xFrac: 0.3, sizeFrac: 0.21, opacity: 0.55 }, // near
+          { src: PLANET_AQUAMARINE, xFrac: 0.7, sizeFrac: 0.11, opacity: 0.45 }, // far
+          { src: PLANET_BLUEGIANT, xFrac: 0.5, sizeFrac: 0.15, opacity: 0.5 }, // mid
         ],
       },
     },
@@ -934,9 +1000,9 @@ export const BACKGROUNDS: BackgroundDef[] = [
       // Cool/green worlds against the red/rust nebula.
       planet: {
         items: [
-          { src: PLANET_GREENGIANT, xFrac: 0.7, sizeFrac: 0.46, opacity: 1 }, // near
-          { src: PLANET_LUSH, xFrac: 0.3, sizeFrac: 0.24, opacity: 0.82 }, // far
-          { src: PLANET_GLACIAL, xFrac: 0.52, sizeFrac: 0.33, opacity: 0.9 }, // mid
+          { src: PLANET_GREENGIANT, xFrac: 0.7, sizeFrac: 0.21, opacity: 0.55 }, // near
+          { src: PLANET_LUSH, xFrac: 0.3, sizeFrac: 0.11, opacity: 0.45 }, // far
+          { src: PLANET_GLACIAL, xFrac: 0.52, sizeFrac: 0.15, opacity: 0.5 }, // mid
         ],
       },
     },
@@ -951,9 +1017,9 @@ export const BACKGROUNDS: BackgroundDef[] = [
       ...sbsSet(SBS_GREEN),
       planet: {
         items: [
-          { src: PLANET_MAGMA, xFrac: 0.28, sizeFrac: 0.44, opacity: 1 }, // near
-          { src: PLANET_REDGIANT, xFrac: 0.7, sizeFrac: 0.24, opacity: 0.82 }, // far
-          { src: PLANET_BARREN, xFrac: 0.5, sizeFrac: 0.32, opacity: 0.9 }, // mid
+          { src: PLANET_MAGMA, xFrac: 0.28, sizeFrac: 0.2, opacity: 0.55 }, // near
+          { src: PLANET_REDGIANT, xFrac: 0.7, sizeFrac: 0.11, opacity: 0.45 }, // far
+          { src: PLANET_BARREN, xFrac: 0.5, sizeFrac: 0.14, opacity: 0.5 }, // mid
         ],
       },
     },
@@ -973,9 +1039,9 @@ export const BACKGROUNDS: BackgroundDef[] = [
       // Blue/cool worlds amid the dusty pink clouds.
       planet: {
         items: [
-          { src: PLANET_OCEAN, xFrac: 0.68, sizeFrac: 0.46, opacity: 1 }, // near
-          { src: PLANET_TERRESTRIAL, xFrac: 0.3, sizeFrac: 0.24, opacity: 0.85 }, // far
-          { src: PLANET_ICY, xFrac: 0.52, sizeFrac: 0.33, opacity: 0.92 }, // mid
+          { src: PLANET_OCEAN, xFrac: 0.68, sizeFrac: 0.21, opacity: 0.55 }, // near
+          { src: PLANET_TERRESTRIAL, xFrac: 0.3, sizeFrac: 0.11, opacity: 0.47 }, // far
+          { src: PLANET_ICY, xFrac: 0.52, sizeFrac: 0.15, opacity: 0.51 }, // mid
         ],
       },
     },

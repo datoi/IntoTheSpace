@@ -4,7 +4,7 @@ import * as Haptics from 'expo-haptics';
 import ObstacleView from '../components/Obstacle';
 import ParticleLayer from '../components/ParticleLayer';
 import PerfOverlay, { newPerfStats, nowMs } from '../components/PerfOverlay';
-import { ParallaxBackground, bgPeriod } from '../components/Parallax';
+import { ParallaxBackground, layerPeriod } from '../components/Parallax';
 import { FONTS, TYPE } from '../game/type';
 import Icon from '../components/Icon';
 import { LowHullPulse, useReduceMotion } from '../components/Motion';
@@ -1426,10 +1426,13 @@ export default function GameScreen({
       // Scroll each parallax layer on the native side: set its translateY to the
       // altitude-driven offset, wrapped within one repeat period. No React
       // re-render — the background subtree stays mounted and memoized.
-      const bgP = bgPeriod(background);
       for (let i = 0; i < bgAnims.current.length; i++) {
-        const off = s.alt * BG_PX_PER_M * background.layers[i].speed;
-        bgAnims.current[i].setValue(off % bgP);
+        const L = background.layers[i];
+        const off = s.alt * BG_PX_PER_M * L.speed;
+        // Each layer wraps on its OWN period — the star veil is a square tile
+        // in sets that otherwise tile at 16:9, and one shared period would
+        // slide it the wrong distance and tear a seam through the stars.
+        bgAnims.current[i].setValue(off % layerPeriod(background, L));
       }
       if (background.planet) {
         const planetPeriod = background.planet.items.length * PLANET_SPACING;

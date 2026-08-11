@@ -31,6 +31,7 @@ import {
   MAX_PARTICLES,
   MAX_EXPLOSIONS,
   MAX_ENEMY_BULLETS,
+  PLANET_SPEED,
   MAX_FLOATS,
   WAVE_MAX_ENEMIES,
   TALON_COUNT,
@@ -457,5 +458,65 @@ describe('camera shake', () => {
   it('quotes every hit against an intensity the game actually uses', () => {
     expect(SHAKE_REF).toBeGreaterThan(0);
     expect(SHAKE_MAX).toBeGreaterThanOrEqual(BOMB_SHAKE);
+  });
+});
+
+describe('planets read as being IN space', () => {
+  // Planets used to draw in FRONT of every layer at 46% of screen width and
+  // full opacity, which reads as a sticker on the lens however it is tuned.
+  // The fix is occlusion: a transparent star veil in front of them, moving
+  // much faster. These pin the three things that make that work — anything in
+  // front, enough speed difference to notice, and planets small and dim enough
+  // to sit in the field rather than on it.
+
+  it('gives every sky something transparent IN FRONT of its planets', () => {
+    // ParallaxBackground draws the planet field between the last two layers,
+    // so a set with only ONE layer puts its planets in front of everything.
+    // That single fact is what made them look pasted on.
+    for (const set of BG_SETS) {
+      if (!set.planet) continue;
+      expect(set.layers.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('makes the front layer visibly overtake the planets', () => {
+    // Occlusion alone is not depth: something crossing at the SAME speed just
+    // covers the planet. The gap is the cue.
+    for (const set of BG_SETS) {
+      if (!set.planet) continue;
+      const front = set.layers[set.layers.length - 1];
+      expect(front.speed).toBeGreaterThan(PLANET_SPEED * 4);
+    }
+  });
+
+  it('keeps the front layer cheap — per-pixel alpha, not group opacity', () => {
+    // Group opacity below 1 asks the platform for an offscreen compositing
+    // buffer the size of the layer, every frame, for the whole run.
+    for (const set of BG_SETS) {
+      if (!set.planet) continue;
+      expect(set.layers[set.layers.length - 1].alpha).toBe(1);
+    }
+  });
+
+  it('keeps planets small and hazed by distance', () => {
+    for (const set of BG_SETS) {
+      for (const p of set.planet?.items ?? []) {
+        expect(p.sizeFrac).toBeLessThanOrEqual(0.25);
+        expect(p.sizeFrac).toBeGreaterThan(0.05);
+        expect(p.opacity).toBeLessThan(0.6);
+      }
+    }
+  });
+
+  it('never draws planets on a tier that has trimmed the veil away', () => {
+    // The quality governor trims layers from the front of the stack, so a low
+    // tier can drop the veil — and without it the planets would be frontmost
+    // again, i.e. the exact bug, only on the weakest devices. Planets must be
+    // off by then.
+    const deepest = Math.max(...BG_SETS.map((s) => s.layers.length));
+    for (const tier of QUALITY_TIERS) {
+      const drawn = Math.max(1, Math.min(deepest, tier.bgLayers));
+      if (drawn < deepest) expect(tier.planets).toBe(false);
+    }
   });
 });

@@ -9,7 +9,7 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import { View, Image, StyleSheet, Animated, Easing } from 'react-native';
-import { PALETTE, SCREEN, BgSet, PlanetLayer, PLANET_SPACING, BG_PX_PER_M, PLANET_SPEED, SHAKE_MAX_PX, QUALITY_TIERS, BG_DIM } from '../game/constants';
+import { PALETTE, SCREEN, BgSet, BgLayer, PlanetLayer, PLANET_SPACING, BG_PX_PER_M, PLANET_SPEED, SHAKE_MAX_PX, QUALITY_TIERS, BG_DIM } from '../game/constants';
 
 /**
  * Per-layer scroll period the caller wraps translateY within (so it never grows
@@ -17,6 +17,17 @@ import { PALETTE, SCREEN, BgSet, PlanetLayer, PLANET_SPACING, BG_PX_PER_M, PLANE
  * plain art every tile.
  */
 export const bgPeriod = (set: BgSet) => (set.mirror ? 2 : 1) * SCREEN.W * set.aspect;
+
+/**
+ * …and the period for ONE layer, which may override the set's tile shape.
+ *
+ * Layers no longer all share a period: the star veil is a square tile shared by
+ * every sky, while the spbg sets tile at 16:9. Wrapping the veil on the set's
+ * period would slide it by the wrong distance and tear a visible seam through
+ * the stars every cycle.
+ */
+export const layerPeriod = (set: BgSet, layer: BgLayer) =>
+  ((layer.mirror ?? set.mirror) ? 2 : 1) * SCREEN.W * (layer.aspect ?? set.aspect);
 
 /**
  * The drifting cast of distant planets for one environment. Each environment
@@ -115,8 +126,13 @@ export const ParallaxBackground = React.memo(function ParallaxBackground({
   // one — a sky with no layers at all is a bug, not a quality setting.
   const layers = set.layers.slice(0, Math.max(1, Math.min(set.layers.length, q.bgLayers)));
   const planet = q.planets ? set.planet : undefined;
-  const tileH = SCREEN.W * set.aspect;
-  const tilesNeeded = Math.ceil(SCREEN.H / tileH) + 3;
+  /**
+   * A layer's tile height. Per LAYER rather than per set, so one sky can mix
+   * tile shapes — the star veil is a square tile shared by every environment,
+   * while the spbg sets tile at 16:9. Still keyed off SCREEN.W, so it agrees
+   * with the scroll period layerPeriod() computes for the same layer.
+   */
+  const tileHOf = (L: BgLayer) => SCREEN.W * (L.aspect ?? set.aspect);
   // The sky is drawn INSIDE the play field's shake layer, so a hard hit slides
   // it by up to SHAKE_MAX_PX and would otherwise pull its own edge into view.
   // Every clip here is inflated by that much on all sides, and the strips inside
@@ -127,6 +143,11 @@ export const ParallaxBackground = React.memo(function ParallaxBackground({
   const CLIP_W = SCREEN.W + PAD * 2;
   const CLIP_H = SCREEN.H + PAD * 2;
   const renderLayer = (L: BgSet['layers'][number], li: number) => {
+    // Tile shape is per LAYER now, not per set: the star veil is a square tile
+    // shared by every sky, while the spbg sets tile at 16:9. See BgLayer.aspect.
+    const tileH = tileHOf(L);
+    const tilesNeeded = Math.ceil(SCREEN.H / tileH) + 3;
+    const mirror = L.mirror ?? set.mirror;
     const tiles: React.ReactNode[] = [];
     // Tiles are OPAQUE (no per-tile opacity) and overlap by ~1px, so wherever two
     // tiles meet the overlap is fully covered — no hairline gap can flash the
@@ -136,7 +157,7 @@ export const ParallaxBackground = React.memo(function ParallaxBackground({
     // fading the flattened group fades it uniformly, so the seam vanishes.
     const tileFill = Math.ceil(tileH) + 1; // integer height so rounding can't shrink the overlap
     for (let i = 0; i < tilesNeeded; i++) {
-      const flipped = set.mirror && i % 2 === 1;
+      const flipped = mirror && i % 2 === 1;
       tiles.push(
         <Image
           key={i}
@@ -293,9 +314,11 @@ export function AmbientParallax({ set, dim = MENU_DIM }: { set: BgSet; dim?: num
   // within one mount; this memo is what guarantees the nodes are stable for the
   // re-renders that DO happen.
   const { layerAnims, planetAnim } = useMemo(() => {
-    const period = bgPeriod(set);
     const metres = (AMBIENT_CYCLE_MS / 1000) * AMBIENT_RATE;
     const layers = set.layers.map((L) => {
+      // Per LAYER: a set can mix tile shapes now (see BgLayer.aspect), and
+      // wrapping a square veil on a 16:9 period tears a seam every cycle.
+      const period = layerPeriod(set, L);
       const distance = metres * BG_PX_PER_M * L.speed;
       // Wrap to a whole number of periods so the loop restart is invisible.
       const wrapped = Math.max(1, Math.round(distance / period)) * period;
