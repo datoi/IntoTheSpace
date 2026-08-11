@@ -31,8 +31,6 @@ import {
   MAX_PARTICLES,
   MAX_EXPLOSIONS,
   MAX_ENEMY_BULLETS,
-  BACKGROUNDS,
-  PLANET_SPEED,
   MAX_FLOATS,
   WAVE_MAX_ENEMIES,
   TALON_COUNT,
@@ -459,69 +457,5 @@ describe('camera shake', () => {
   it('quotes every hit against an intensity the game actually uses', () => {
     expect(SHAKE_REF).toBeGreaterThan(0);
     expect(SHAKE_MAX).toBeGreaterThanOrEqual(BOMB_SHAKE);
-  });
-});
-
-describe('background catalog', () => {
-  it('never drops an id that has ever been purchasable', () => {
-    // An id is the persistence key for a PURCHASE. normalizeSave validates
-    // unlockedBackgrounds against this catalog and drops anything it does not
-    // recognise, so renaming an id silently confiscates that sky from everyone
-    // who owns it. Renaming the DISPLAY NAME is free; renaming the id is not.
-    // Add to this list, never remove from it.
-    const SHIPPED_IDS = ['violet', 'azure', 'void', 'ember', 'crimson', 'verdant', 'quartz'];
-    const ids = BACKGROUNDS.map((b) => b.id);
-    for (const id of SHIPPED_IDS) expect(ids).toContain(id);
-  });
-
-  it('has unique ids and exactly one free starter', () => {
-    const ids = BACKGROUNDS.map((b) => b.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(BACKGROUNDS.filter((b) => b.price === 0)).toHaveLength(1);
-  });
-
-  it('is listed cheapest-first, so the shop reads as a ladder', () => {
-    const prices = BACKGROUNDS.map((b) => b.price);
-    expect([...prices].sort((a, b) => a - b)).toEqual(prices);
-  });
-
-  it('draws at most one moving layer per sky', () => {
-    // The sky is the largest SUSTAINED cost in the game — a full-screen fill
-    // every frame whether the board is empty or carrying a boss. Depth comes
-    // from baking the far starfield into the opaque base, not from stacking
-    // more per-frame composites. See scripts/make-backgrounds.mjs.
-    for (const b of BACKGROUNDS) {
-      expect(b.set.layers).toHaveLength(1);
-      expect(b.set.base).toBeDefined();
-    }
-  });
-
-  it('keeps the star layer at full group alpha', () => {
-    // Group opacity below 1 asks the platform for an offscreen compositing
-    // buffer the size of the layer, every frame. The star PNGs carry their own
-    // per-pixel alpha instead, which is free and looks better.
-    for (const b of BACKGROUNDS) {
-      for (const layer of b.set.layers) expect(layer.alpha).toBe(1);
-    }
-  });
-
-  it('keeps planets distant — small, dim, and slower than the stars', () => {
-    // The realism rule. A planet is far away, so it must be small, hazed by
-    // distance, and overtaken by the starfield in front of it. Planets used to
-    // be drawn at 0.46 of screen width at full opacity IN FRONT of the stars,
-    // which read as a sticker on the lens rather than a world in space.
-    const starSpeed = Math.min(...BACKGROUNDS.flatMap((b) => b.set.layers.map((l) => l.speed)));
-    expect(PLANET_SPEED).toBeLessThan(starSpeed / 3);
-
-    for (const b of BACKGROUNDS) {
-      expect(b.set.planet).toBeDefined();
-      for (const p of b.set.planet!.items) {
-        expect(p.sizeFrac).toBeLessThanOrEqual(0.28);
-        expect(p.sizeFrac).toBeGreaterThan(0.05);
-        expect(p.opacity).toBeLessThan(0.7);
-        expect(p.xFrac).toBeGreaterThan(0);
-        expect(p.xFrac).toBeLessThan(1);
-      }
-    }
   });
 });

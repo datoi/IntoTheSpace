@@ -764,15 +764,7 @@ export interface BgSet {
   planet?: PlanetLayer; // optional far planet drifting through this sky
 }
 
-/**
- * How fast the planet field drifts, against the near starfield's 0.45.
- *
- * The GAP between these two numbers is the depth cue — a planet has to be
- * visibly overtaken by the stars in front of it, or it reads as a decal stuck
- * to the screen no matter how it is drawn. Roughly 7x slower is enough to be
- * obvious without the planets appearing frozen.
- */
-export const PLANET_SPEED = 0.06;
+export const PLANET_SPEED = 0.08; // parallax speed — slow, well below the near layers
 export const PLANET_SPACING = SCREEN.H * 0.58; // vertical gap between planets → 2+ on screen at once
 
 // Planet sprites (SBS 2D Planet Pack, shaded 512 → 256).
@@ -792,36 +784,39 @@ const PLANET_BLUEGIANT = require('../../assets/background/planet_bluegiant.png')
 const PLANET_LUSH = require('../../assets/background/planet_lush.png');
 const PLANET_ICY = require('../../assets/background/planet_icy.png');
 
-// --- The sky ------------------------------------------------------------------
-//
-// Two images per environment, both built by scripts/make-backgrounds.mjs:
-//
-//   base    opaque nebula with a FAR starfield already baked into it
-//   stars   the NEAR starfield, alpha-cut so only the star pixels paint
-//
-// That is TWO full-screen draws for three visible depths, because the far field
-// costs nothing per frame once it is part of the base. The sky is the largest
-// sustained cost in the game — it is drawn in full whether the board is empty or
-// carrying a boss — so the count of layers matters more here than anywhere else.
-//
-// Seamless 512 tiles rather than screen-sized art: 512x512 decodes to 1MB where
-// the old 720x1280 bases were 3.5MB each, and being seamless they tile instead
-// of stretching.
-//
-// The star layer is drawn at alpha 1 and carries its own per-pixel alpha. That
-// is deliberate — a GROUP opacity below 1 asks the platform for an offscreen
-// compositing buffer the size of the layer, every frame. Per-pixel alpha in the
-// PNG costs nothing extra and looks better, because stars keep their own
-// brightness instead of every one being faded by the same amount.
-const skySet = (base: number, stars: number, planets: PlanetItem[]): BgSet => ({
+const SPBG_ASPECT = 1280 / 720;
+const spbgSet = (base: number, far: number, mid: number, near: number): BgSet => ({
   base,
-  aspect: 1, // square seamless tile
-  mirror: false, // seamless art repeats plainly; no mirrored parity needed
-  // ONE moving layer. It is the near starfield, and it is the fastest thing in
-  // the sky at 0.45 — which is the point: it has to visibly overtake the planets
-  // drifting behind it (PLANET_SPEED 0.06) or there is no depth cue.
-  layers: [{ src: stars, speed: 0.45, alpha: 1 }],
-  planet: { items: planets },
+  aspect: SPBG_ASPECT,
+  mirror: true,
+  // ONE layer, the far one.
+  //
+  // Every parallax layer is a full-screen alpha blend, every frame, for the
+  // whole run — the largest sustained GPU cost in the game and the thing that
+  // heats the phone. The near and mid layers are also the fastest-moving and the
+  // least legible: at speed 0.5–1.0 they read as noise over the play field.
+  //
+  // The FAR layer is the one kept everywhere, because it is the slowest and
+  // therefore the one that reads as a backdrop rather than as motion. These sets
+  // still have their static `base` behind it, so losing two layers costs depth
+  // rather than content.
+  layers: [{ src: far, speed: 0.2, alpha: 0.4 }],
+});
+
+// Shared SBS starfield tiles (opaque black — partial alpha lets the nebula
+// underneath show through while the stars stay visible).
+const SBS_STARS_MID = require('../../assets/background/sbs_stars_mid.png');
+const SBS_STARS_NEAR = require('../../assets/background/sbs_stars_near.png');
+const SBS_PURPLE = require('../../assets/background/sbs_purple.png');
+const SBS_BLUE = require('../../assets/background/sbs_blue.png');
+const SBS_GREEN = require('../../assets/background/sbs_green.png');
+const sbsSet = (nebula: number): BgSet => ({
+  aspect: 1,
+  mirror: false,
+  // Just the nebula — see the note in spbgSet. It is both the slowest layer
+  // (speed 0.15) and the one carrying the set's colour, and unlike the spbg sets
+  // these have no static base behind them, so it has to be the opaque one.
+  layers: [{ src: nebula, speed: 0.15, alpha: 1 }],
 });
 
 // --- Backgrounds: one environment is shown for the whole run; the player
@@ -836,221 +831,158 @@ export interface BackgroundDef {
 }
 
 export const BACKGROUNDS: BackgroundDef[] = [
+  // Dark purple/rose haze — the free starter (was the opening view). Unlike the
+  // other SBS sets, the nebula is drawn IN FRONT of the starfields (at partial
+  // alpha so the stars still shine through) — a slow fog drifting over stars.
   {
     id: 'violet',
     name: 'Violet Veil',
     price: 0,
-    preview: require('../../assets/background/bg_violet_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_violet_base.jpg'),
-      require('../../assets/background/bg_violet_stars.png'),
-      [
-          { src: PLANET_REDGIANT, xFrac: 0.7, sizeFrac: 0.2, opacity: 0.47 }, // near
-          { src: PLANET_LUNAR, xFrac: 0.28, sizeFrac: 0.09, opacity: 0.34 }, // far
-          { src: PLANET_ARID, xFrac: 0.52, sizeFrac: 0.13, opacity: 0.39 }, // mid
-      ]
-    ),
+    preview: SBS_PURPLE,
+    set: {
+      aspect: 1,
+      mirror: false,
+      // Just the veil. It is the slowest layer here (0.15) exactly as `far` is
+      // in the other sets, so "keep the far one" picks it on the same rule —
+      // and it happens to be the layer the background is named for. Raised to
+      // full alpha now that there are no starfields underneath for it to let
+      // through; at 0.6 over bare void it would have read as washed out.
+      layers: [{ src: SBS_PURPLE, speed: 0.15, alpha: 1 }],
+      // Warm/neutral worlds against the cool violet haze.
+      planet: {
+        items: [
+          { src: PLANET_REDGIANT, xFrac: 0.68, sizeFrac: 0.46, opacity: 1 }, // near
+          { src: PLANET_LUNAR, xFrac: 0.3, sizeFrac: 0.22, opacity: 0.78 }, // far
+          { src: PLANET_ARID, xFrac: 0.6, sizeFrac: 0.33, opacity: 0.9 }, // mid
+        ],
+      },
+    },
   },
   {
     id: 'azure',
-    name: 'Azure Drift',
+    name: 'Azure Drift', // teal/blue wisps
     price: 120,
-    preview: require('../../assets/background/bg_azure_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_azure_base.jpg'),
-      require('../../assets/background/bg_azure_stars.png'),
-      [
-          { src: PLANET_ORANGE, xFrac: 0.26, sizeFrac: 0.19, opacity: 0.47 }, // near
-          { src: PLANET_MAGMA, xFrac: 0.72, sizeFrac: 0.1, opacity: 0.36 }, // far
-          { src: PLANET_BARREN, xFrac: 0.5, sizeFrac: 0.14, opacity: 0.41 }, // mid
-      ]
-    ),
-  },
-  {
-    id: 'verdant',
-    name: 'Verdant Reach',
-    price: 180,
-    preview: require('../../assets/background/bg_verdant_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_verdant_base.jpg'),
-      require('../../assets/background/bg_verdant_stars.png'),
-      [
-          { src: PLANET_GREENGIANT, xFrac: 0.72, sizeFrac: 0.21, opacity: 0.44 }, // near
-          { src: PLANET_LUSH, xFrac: 0.3, sizeFrac: 0.1, opacity: 0.36 }, // far
-          { src: PLANET_GLACIAL, xFrac: 0.5, sizeFrac: 0.13, opacity: 0.39 }, // mid
-      ]
-    ),
-  },
-  {
-    id: 'teal',
-    name: 'Cyan Shoals',
-    price: 240,
-    preview: require('../../assets/background/bg_teal_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_teal_base.jpg'),
-      require('../../assets/background/bg_teal_stars.png'),
-      [
-          { src: PLANET_OCEAN, xFrac: 0.3, sizeFrac: 0.2, opacity: 0.46 }, // near
-          { src: PLANET_AQUAMARINE, xFrac: 0.7, sizeFrac: 0.1, opacity: 0.36 }, // far
-          { src: PLANET_ICY, xFrac: 0.52, sizeFrac: 0.13, opacity: 0.39 }, // mid
-      ]
-    ),
-  },
-  {
-    // id kept as 'quartz' from the original catalog: ids are the persistence
-    // key for a PURCHASE, so renaming one silently confiscates it from anyone
-    // who owns it (normalizeSave drops ids the catalog no longer has).
-    id: 'quartz',
-    name: 'Rose Quartz',
-    price: 300,
-    preview: require('../../assets/background/bg_quartz_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_quartz_base.jpg'),
-      require('../../assets/background/bg_quartz_stars.png'),
-      [
-          { src: PLANET_TERRESTRIAL, xFrac: 0.68, sizeFrac: 0.19, opacity: 0.44 }, // near
-          { src: PLANET_LUNAR, xFrac: 0.3, sizeFrac: 0.09, opacity: 0.34 }, // far
-          { src: PLANET_ARID, xFrac: 0.5, sizeFrac: 0.12, opacity: 0.37 }, // mid
-      ]
-    ),
-  },
-  {
-    id: 'ember',
-    name: 'Ember Trail',
-    price: 360,
-    preview: require('../../assets/background/bg_ember_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_ember_base.jpg'),
-      require('../../assets/background/bg_ember_stars.png'),
-      [
-          { src: PLANET_MAGMA, xFrac: 0.28, sizeFrac: 0.2, opacity: 0.48 }, // near
-          { src: PLANET_REDGIANT, xFrac: 0.72, sizeFrac: 0.11, opacity: 0.37 }, // far
-          { src: PLANET_BARREN, xFrac: 0.52, sizeFrac: 0.13, opacity: 0.39 }, // mid
-      ]
-    ),
-  },
-  {
-    id: 'gold',
-    name: 'Gilded Expanse',
-    price: 420,
-    preview: require('../../assets/background/bg_gold_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_gold_base.jpg'),
-      require('../../assets/background/bg_gold_stars.png'),
-      [
-          { src: PLANET_YELLOWGIANT, xFrac: 0.7, sizeFrac: 0.21, opacity: 0.47 }, // near
-          { src: PLANET_ARID, xFrac: 0.28, sizeFrac: 0.09, opacity: 0.34 }, // far
-          { src: PLANET_LUNAR, xFrac: 0.5, sizeFrac: 0.12, opacity: 0.37 }, // mid
-      ]
-    ),
-  },
-  {
-    id: 'toxic',
-    name: 'Toxic Bloom',
-    price: 480,
-    preview: require('../../assets/background/bg_toxic_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_toxic_base.jpg'),
-      require('../../assets/background/bg_toxic_stars.png'),
-      [
-          { src: PLANET_LUSH, xFrac: 0.3, sizeFrac: 0.19, opacity: 0.44 }, // near
-          { src: PLANET_GREENGIANT, xFrac: 0.7, sizeFrac: 0.11, opacity: 0.37 }, // far
-          { src: PLANET_BARREN, xFrac: 0.5, sizeFrac: 0.13, opacity: 0.38 }, // mid
-      ]
-    ),
-  },
-  {
-    id: 'ion',
-    name: 'Ion Storm',
-    price: 560,
-    preview: require('../../assets/background/bg_ion_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_ion_base.jpg'),
-      require('../../assets/background/bg_ion_stars.png'),
-      [
-          { src: PLANET_BLUEGIANT, xFrac: 0.72, sizeFrac: 0.21, opacity: 0.46 }, // near
-          { src: PLANET_ICY, xFrac: 0.28, sizeFrac: 0.1, opacity: 0.36 }, // far
-          { src: PLANET_TERRESTRIAL, xFrac: 0.5, sizeFrac: 0.13, opacity: 0.39 }, // mid
-      ]
-    ),
-  },
-  {
-    id: 'aurora',
-    name: 'Aurora Bank',
-    price: 640,
-    preview: require('../../assets/background/bg_aurora_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_aurora_base.jpg'),
-      require('../../assets/background/bg_aurora_stars.png'),
-      [
-          { src: PLANET_AQUAMARINE, xFrac: 0.3, sizeFrac: 0.2, opacity: 0.45 }, // near
-          { src: PLANET_GLACIAL, xFrac: 0.7, sizeFrac: 0.1, opacity: 0.36 }, // far
-          { src: PLANET_OCEAN, xFrac: 0.52, sizeFrac: 0.13, opacity: 0.39 }, // mid
-      ]
-    ),
-  },
-  {
-    id: 'crimson',
-    name: 'Crimson Rift',
-    price: 720,
-    preview: require('../../assets/background/bg_crimson_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_crimson_base.jpg'),
-      require('../../assets/background/bg_crimson_stars.png'),
-      [
-          { src: PLANET_REDGIANT, xFrac: 0.28, sizeFrac: 0.21, opacity: 0.48 }, // near
-          { src: PLANET_MAGMA, xFrac: 0.7, sizeFrac: 0.11, opacity: 0.37 }, // far
-          { src: PLANET_ARID, xFrac: 0.5, sizeFrac: 0.13, opacity: 0.38 }, // mid
-      ]
-    ),
-  },
-  {
-    id: 'magma',
-    name: 'Forge Belt',
-    price: 800,
-    preview: require('../../assets/background/bg_magma_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_magma_base.jpg'),
-      require('../../assets/background/bg_magma_stars.png'),
-      [
-          { src: PLANET_MAGMA, xFrac: 0.7, sizeFrac: 0.21, opacity: 0.49 }, // near
-          { src: PLANET_YELLOWGIANT, xFrac: 0.28, sizeFrac: 0.11, opacity: 0.37 }, // far
-          { src: PLANET_BARREN, xFrac: 0.5, sizeFrac: 0.13, opacity: 0.39 }, // mid
-      ]
-    ),
-  },
-  {
-    id: 'abyss',
-    name: 'The Abyss',
-    price: 880,
-    preview: require('../../assets/background/bg_abyss_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_abyss_base.jpg'),
-      require('../../assets/background/bg_abyss_stars.png'),
-      [
-          { src: PLANET_BLUEGIANT, xFrac: 0.68, sizeFrac: 0.18, opacity: 0.53 }, // near
-          { src: PLANET_ICY, xFrac: 0.3, sizeFrac: 0.09, opacity: 0.39 }, // far
-          { src: PLANET_GLACIAL, xFrac: 0.5, sizeFrac: 0.12, opacity: 0.44 }, // mid
-      ]
-    ),
+    preview: SBS_BLUE,
+    // Warm worlds pop against the teal/blue.
+    set: {
+      ...sbsSet(SBS_BLUE),
+      planet: {
+        items: [
+          { src: PLANET_ORANGE, xFrac: 0.28, sizeFrac: 0.44, opacity: 1 }, // near
+          { src: PLANET_MAGMA, xFrac: 0.7, sizeFrac: 0.24, opacity: 0.82 }, // far
+          { src: PLANET_BARREN, xFrac: 0.45, sizeFrac: 0.32, opacity: 0.9 }, // mid
+        ],
+      },
+    },
   },
   {
     id: 'void',
-    name: 'Deep Void',
-    price: 960,
-    preview: require('../../assets/background/bg_void_base.jpg'),
-    set: skySet(
-      require('../../assets/background/bg_void_base.jpg'),
-      require('../../assets/background/bg_void_stars.png'),
-      [
-          { src: PLANET_LUNAR, xFrac: 0.3, sizeFrac: 0.16, opacity: 0.51 }, // near
-          { src: PLANET_BARREN, xFrac: 0.7, sizeFrac: 0.08, opacity: 0.37 }, // far
-          { src: PLANET_TERRESTRIAL, xFrac: 0.52, sizeFrac: 0.11, opacity: 0.43 }, // mid
-      ]
-    ),
+    name: 'Deep Void', // void_02 — near-black quiet starfield
+    price: 90,
+    preview: require('../../assets/background/bg1_base.jpg'),
+    set: {
+      ...spbgSet(
+        require('../../assets/background/bg1_base.jpg'),
+        require('../../assets/background/bg1_far.jpg'),
+        require('../../assets/background/bg1_mid.jpg'),
+        require('../../assets/background/bg1_near.jpg')
+      ),
+      // Bright worlds, brilliant against the near-black void.
+      planet: {
+        items: [
+          { src: PLANET_TERRESTRIAL, xFrac: 0.68, sizeFrac: 0.48, opacity: 1 }, // near
+          { src: PLANET_OCEAN, xFrac: 0.3, sizeFrac: 0.24, opacity: 0.85 }, // far
+          { src: PLANET_YELLOWGIANT, xFrac: 0.55, sizeFrac: 0.34, opacity: 0.95 }, // mid
+        ],
+      },
+    },
+  },
+  {
+    id: 'ember',
+    name: 'Ember Reach', // stellar_03 — orange wisps on blue-grey
+    price: 240,
+    preview: require('../../assets/background/bg2_base.jpg'),
+    set: {
+      ...spbgSet(
+        require('../../assets/background/bg2_base.jpg'),
+        require('../../assets/background/bg2_far.jpg'),
+        require('../../assets/background/bg2_mid.jpg'),
+        require('../../assets/background/bg2_near.jpg')
+      ),
+      // Cool icy worlds contrasting the warm ember wisps.
+      planet: {
+        items: [
+          { src: PLANET_GLACIAL, xFrac: 0.3, sizeFrac: 0.46, opacity: 1 }, // near
+          { src: PLANET_AQUAMARINE, xFrac: 0.7, sizeFrac: 0.24, opacity: 0.82 }, // far
+          { src: PLANET_BLUEGIANT, xFrac: 0.5, sizeFrac: 0.33, opacity: 0.9 }, // mid
+        ],
+      },
+    },
+  },
+  {
+    id: 'crimson',
+    name: 'Crimson Cloud', // stellar_01 — red/rust nebula (the showpiece)
+    price: 450,
+    preview: require('../../assets/background/bg0_base.jpg'),
+    set: {
+      ...spbgSet(
+        require('../../assets/background/bg0_base.jpg'),
+        require('../../assets/background/bg0_far.jpg'),
+        require('../../assets/background/bg0_mid.jpg'),
+        require('../../assets/background/bg0_near.jpg')
+      ),
+      // Cool/green worlds against the red/rust nebula.
+      planet: {
+        items: [
+          { src: PLANET_GREENGIANT, xFrac: 0.7, sizeFrac: 0.46, opacity: 1 }, // near
+          { src: PLANET_LUSH, xFrac: 0.3, sizeFrac: 0.24, opacity: 0.82 }, // far
+          { src: PLANET_GLACIAL, xFrac: 0.52, sizeFrac: 0.33, opacity: 0.9 }, // mid
+        ],
+      },
+    },
+  },
+  {
+    id: 'verdant',
+    name: 'Verdant Aurora', // vivid green aurora
+    price: 300,
+    preview: SBS_GREEN,
+    // Warm worlds against the green aurora.
+    set: {
+      ...sbsSet(SBS_GREEN),
+      planet: {
+        items: [
+          { src: PLANET_MAGMA, xFrac: 0.28, sizeFrac: 0.44, opacity: 1 }, // near
+          { src: PLANET_REDGIANT, xFrac: 0.7, sizeFrac: 0.24, opacity: 0.82 }, // far
+          { src: PLANET_BARREN, xFrac: 0.5, sizeFrac: 0.32, opacity: 0.9 }, // mid
+        ],
+      },
+    },
+  },
+  {
+    id: 'quartz',
+    name: 'Rose Quartz', // stellar_05 — dusty pink/blue clouds
+    price: 180,
+    preview: require('../../assets/background/bg3_base.jpg'),
+    set: {
+      ...spbgSet(
+        require('../../assets/background/bg3_base.jpg'),
+        require('../../assets/background/bg3_far.jpg'),
+        require('../../assets/background/bg3_mid.jpg'),
+        require('../../assets/background/bg3_near.jpg')
+      ),
+      // Blue/cool worlds amid the dusty pink clouds.
+      planet: {
+        items: [
+          { src: PLANET_OCEAN, xFrac: 0.68, sizeFrac: 0.46, opacity: 1 }, // near
+          { src: PLANET_TERRESTRIAL, xFrac: 0.3, sizeFrac: 0.24, opacity: 0.85 }, // far
+          { src: PLANET_ICY, xFrac: 0.52, sizeFrac: 0.33, opacity: 0.92 }, // mid
+        ],
+      },
+    },
   },
 ];
 
+// Every background's parallax set — still consumed by the boot preloader.
 export const BG_SETS: BgSet[] = BACKGROUNDS.map((b) => b.set);
 export const BG_PX_PER_M = 0.4; // near-layer scroll px per meter climbed
 /**
