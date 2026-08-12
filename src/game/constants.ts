@@ -776,13 +776,13 @@ export interface BgSet {
 }
 
 /**
- * How fast the planet field drifts, against the star veil's 0.45.
+ * How fast the planet field drifts, against the star fields' 0.18 and 0.30.
  *
  * The GAP between the two is the depth cue. A planet has to be visibly
  * overtaken by the stars in front of it; at similar speeds the veil merely
  * covers it and the eye reads both as being the same distance away.
  */
-export const PLANET_SPEED = 0.05;
+export const PLANET_SPEED = 0.04;
 export const PLANET_SPACING = SCREEN.H * 0.58; // vertical gap between planets → 2+ on screen at once
 
 // Planet sprites (SBS 2D Planet Pack, shaded 512 → 256).
@@ -802,46 +802,57 @@ const PLANET_BLUEGIANT = require('../../assets/background/planet_bluegiant.png')
 const PLANET_LUSH = require('../../assets/background/planet_lush.png');
 const PLANET_ICY = require('../../assets/background/planet_icy.png');
 
-// --- The star veil ------------------------------------------------------------
+// --- The starfield ------------------------------------------------------------
 //
-// A sparse field of stars with REAL per-pixel alpha, drawn in FRONT of the
-// planets and drifting far faster than they do. Built by
-// scripts/make-star-veil.mjs from the pack's own starfields, whose alpha is
-// either absent or unusable — sbs_stars_near.png is fully opaque, so drawing it
-// over anything would black the sky out.
+// TWO fields, drawn by scripts/make-star-veil.mjs, straddling the planets:
 //
-// This layer exists for one reason: OCCLUSION. Planets read as stickers on the
-// lens when nothing ever passes between them and the player, and no amount of
-// shrinking or fading fixes that, because it is not the cue the eye uses.
-// Reordering the old layers could not fix it either — they are opaque, so a
-// planet moved behind them is not distant, it is gone. Something transparent
-// has to be in front, and until now nothing was.
+//   far    dense, faint, tiny        0.18   behind the planets
+//   near   sparse, brighter, larger  0.30   in front of them
 //
-// ONE file for every sky: stars are white and need not match the nebula behind
-// them, so this is a single bitmap and a single decode rather than one per set.
-const STAR_VEIL = require('../../assets/background/star_veil.png');
+// The pair does two jobs one layer cannot.
+//
+// OCCLUSION. Planets read as stickers on the lens when nothing ever passes
+// between them and the player, and no amount of shrinking or fading fixes that
+// because it is not the cue the eye uses. Reordering the original layers could
+// not fix it either — they are opaque, so a planet moved behind them is not
+// distant, it is gone. Something transparent has to be in front.
+//
+// DEPTH WITHIN THE FIELD. Real stars are not all the same distance away. One
+// plane of them looks like a plane no matter how it is drawn or how fast it
+// moves; two planes at different rates is the cheapest thing that does not.
+//
+// --- On the speeds ------------------------------------------------------------
+//
+// Both are SLOW, and close to the nebula's own 0.15. The first attempt ran a
+// single field at 0.45 — triple the sky behind it — and the whole starfield
+// swept past like a scrim dragged over the screen, which is precisely the
+// artificial look this replaces. Stars are the most distant things in frame and
+// must be among the slowest. The occlusion cue is preserved by slowing the
+// PLANETS below them instead (PLANET_SPEED), so the stars gently overtake
+// rather than race.
+//
+// Shared by every sky: stars are white and need not match the nebula behind
+// them, so this is two bitmaps and two decodes for the whole game.
+const STAR_FAR = require('../../assets/background/star_far.png');
+const STAR_NEAR = require('../../assets/background/star_near.png');
 
 /**
- * The veil as a layer. A square seamless tile, so it overrides the tile shape
- * of any set that is not square (see BgLayer.aspect) rather than being
- * stretched into vertical streaks.
+ * Both star fields, in draw order.
  *
- * Drawn at group alpha 1, carrying its own per-pixel alpha: a group opacity
- * below 1 asks the platform for an offscreen compositing buffer every frame,
- * where per-pixel alpha is free and looks better — each star keeps its own
- * brightness instead of all of them being faded by the same amount.
+ * Square seamless tiles, so they override the tile shape of any set that is
+ * not square (see BgLayer.aspect) rather than being stretched into vertical
+ * streaks.
  *
- * The SPEED is the whole point. At 0.45 against PLANET_SPEED's 0.05 it visibly
- * overtakes the planets; a veil drifting at their pace would occlude them
- * without ever reading as nearer.
+ * Group alpha stays 1 and the PNGs carry their own per-pixel alpha: a group
+ * opacity below 1 asks the platform for an offscreen compositing buffer every
+ * frame, where per-pixel alpha is free and looks better — every star keeps its
+ * own brightness instead of all of them being faded by the same amount, which
+ * is the whole point of drawing a magnitude distribution in the first place.
  */
-const veilLayer = (): BgLayer => ({
-  src: STAR_VEIL,
-  speed: 0.45,
-  alpha: 1,
-  aspect: 1,
-  mirror: false,
-});
+const starLayers = (): BgLayer[] => [
+  { src: STAR_FAR, speed: 0.18, alpha: 1, aspect: 1, mirror: false },
+  { src: STAR_NEAR, speed: 0.3, alpha: 1, aspect: 1, mirror: false },
+];
 
 const SPBG_ASPECT = 1280 / 720;
 const spbgSet = (base: number, far: number, mid: number, near: number): BgSet => ({
@@ -863,7 +874,7 @@ const spbgSet = (base: number, far: number, mid: number, near: number): BgSet =>
   // between the last two layers, so a second layer here is what finally puts
   // the planets behind something — with one layer they were always in front of
   // everything, which is exactly why they read as pasted on.
-  layers: [{ src: far, speed: 0.2, alpha: 0.4 }, veilLayer()],
+  layers: [{ src: far, speed: 0.2, alpha: 0.4 }, ...starLayers()],
 });
 
 // Shared SBS starfield tiles (opaque black — partial alpha lets the nebula
@@ -879,7 +890,7 @@ const sbsSet = (nebula: number): BgSet => ({
   // Just the nebula — see the note in spbgSet. It is both the slowest layer
   // (speed 0.15) and the one carrying the set's colour, and unlike the spbg sets
   // these have no static base behind them, so it has to be the opaque one.
-  layers: [{ src: nebula, speed: 0.15, alpha: 1 }, veilLayer()],
+  layers: [{ src: nebula, speed: 0.15, alpha: 1 }, ...starLayers()],
 });
 
 // --- Backgrounds: one environment is shown for the whole run; the player
@@ -913,7 +924,7 @@ export const BACKGROUNDS: BackgroundDef[] = [
       // Spelled out rather than using sbsSet, but it still needs the veil — the
       // planets have to have something in front of them or they read as pasted
       // on, and this is the STARTER sky, so it is the first one anyone sees.
-      layers: [{ src: SBS_PURPLE, speed: 0.15, alpha: 1 }, veilLayer()],
+      layers: [{ src: SBS_PURPLE, speed: 0.15, alpha: 1 }, ...starLayers()],
       // Warm/neutral worlds against the cool violet haze.
       planet: {
         items: [

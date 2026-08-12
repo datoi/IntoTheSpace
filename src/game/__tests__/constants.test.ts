@@ -489,6 +489,42 @@ describe('planets read as being IN space', () => {
     }
   });
 
+  it('puts a star field on BOTH sides of the planets', () => {
+    // The planet has to sit INSIDE the starfield, not on one side of it: stars
+    // drifting behind as well as across is what stops the front field reading
+    // as a scrim laid over the picture.
+    for (const set of BG_SETS) {
+      if (!set.planet) continue;
+      // ParallaxBackground draws the field one layer from the front, so
+      // everything before that index is behind the planets.
+      expect(set.layers.length).toBeGreaterThanOrEqual(3);
+      const behind = set.layers.slice(0, -1);
+      expect(behind.some((L) => L.speed > PLANET_SPEED)).toBe(true);
+    }
+  });
+
+  it('keeps the star fields SLOW, near the sky they sit in', () => {
+    // The first attempt ran one field at 0.45 against a 0.15 nebula and the
+    // whole starfield swept past like a scrim. Stars are the most distant
+    // things in frame; nothing may outrun the backdrop by much.
+    for (const set of BG_SETS) {
+      if (!set.planet) continue;
+      const backdrop = set.layers[0].speed;
+      for (const L of set.layers.slice(1)) {
+        expect(L.speed).toBeLessThan(backdrop * 2.5);
+      }
+    }
+  });
+
+  it('separates the two star fields, so they are not one plane', () => {
+    // Two fields at the same rate is one field with extra cost.
+    for (const set of BG_SETS) {
+      if (!set.planet) continue;
+      const [far, near] = set.layers.slice(-2);
+      expect(near.speed).toBeGreaterThan(far.speed * 1.3);
+    }
+  });
+
   it('keeps the front layer cheap — per-pixel alpha, not group opacity', () => {
     // Group opacity below 1 asks the platform for an offscreen compositing
     // buffer the size of the layer, every frame, for the whole run.
