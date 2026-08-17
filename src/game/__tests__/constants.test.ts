@@ -27,7 +27,6 @@ import {
   SHAKE_REF,
   SHAKE_MAX,
   SHAKE_MAX_PX,
-  BOMB_SHAKE,
   MAX_PARTICLES,
   MAX_EXPLOSIONS,
   MAX_ENEMY_BULLETS,
@@ -53,9 +52,58 @@ import {
   HEART_EVERY,
   AVATAR_Y,
   AVATAR_SIZE,
+  AVATAR_HULL_CY,
+  AVATAR_HULL_D,
+  AVATAR_HIT_W,
+  AVATAR_HIT_H,
+  SHIELD_RING,
+  SHIELD_HITS,
+  BULWARK_RING,
   SPECIALS,
 } from '../constants';
 import { ARCH_KINDS } from '../enemies';
+
+describe('the hull, and what gets drawn around it', () => {
+  it('does not confuse the drawn hull with the hitbox', () => {
+    // These are ~15px apart: the hitbox is small and sits low, the sprite is
+    // larger and lifted. Anything centred on the hitbox renders behind the
+    // ship, which is exactly what the shield hoop did.
+    expect(AVATAR_HULL_CY).not.toBeCloseTo(AVATAR_SIZE / 2, 1);
+    // The hull is drawn ABOVE the hitbox centre, never below it.
+    expect(AVATAR_HULL_CY).toBeLessThan(AVATAR_SIZE / 2);
+  });
+
+  it('keeps the shield hoop wider than the hull it encloses', () => {
+    // It was 78 against an ~81px hull — narrower than the ship, so the wingtips
+    // sat outside the bubble even once the centring was right.
+    expect(SHIELD_RING).toBeGreaterThan(AVATAR_HULL_D);
+  });
+
+  it('keeps Bulwark reading as the heavier of the two shells', () => {
+    expect(BULWARK_RING).toBeGreaterThan(SHIELD_RING);
+  });
+
+  it('keeps the hurtbox the size it always was, only better placed', () => {
+    // Recentring it must not quietly retune difficulty: same 44×44 area as the
+    // box it replaced, so the only thing that changed is where it sits.
+    expect(AVATAR_HIT_W).toBe(44);
+    expect(AVATAR_HIT_H).toBe(44);
+  });
+
+  it('keeps the hurtbox well inside the drawn hull', () => {
+    // Genre convention, and what makes dense patterns survivable: the ship you
+    // see is the fantasy, the box that can be hit is a fraction of it.
+    expect(AVATAR_HIT_W).toBeLessThan(AVATAR_HULL_D);
+    expect(AVATAR_HIT_H).toBeLessThan(AVATAR_HULL_D);
+  });
+
+  it('gives the shield a finite, whole-numbered budget', () => {
+    // The whole point: a shield that absorbs everything for its full duration
+    // means the correct play is to stop dodging, which deletes the game.
+    expect(Number.isInteger(SHIELD_HITS)).toBe(true);
+    expect(SHIELD_HITS).toBeGreaterThanOrEqual(1);
+  });
+});
 
 describe('laneX', () => {
   it('centers lane 0 half a lane-width in from the left pad', () => {
@@ -124,10 +172,10 @@ describe('enemy shot art follows the archetype, not the ship tier', () => {
   });
 
   it('gives every archetype that actually fires its OWN shot', () => {
-    // The point of the change. Kamikaze never fires and the Mine Layer's mines
-    // are drawn rather than sprited, so those two alias another entry; every
-    // remaining archetype must be distinguishable by its bullet alone.
-    const firing = ARCH_KINDS.filter((k) => k !== 'kamikaze' && k !== 'layer');
+    // The point of the change. Kamikaze never fires, so it aliases another
+    // entry; every remaining archetype must be distinguishable by its bullet
+    // alone.
+    const firing = ARCH_KINDS.filter((k) => k !== 'kamikaze');
     const used = firing.map((k) => ENEMY_SHOT_FOR_ARCH[k]);
     expect(new Set(used).size).toBe(used.length);
   });
@@ -153,13 +201,13 @@ describe('enemy shot art follows the archetype, not the ship tier', () => {
 
 describe('boss HP formulas', () => {
   it('mini boss HP grows linearly with wave', () => {
-    expect(BOSS_MINI_HP(5)).toBe(22 + 10);
-    expect(BOSS_MINI_HP(15)).toBe(22 + 30);
+    expect(BOSS_MINI_HP(5)).toBe(90 + 80);
+    expect(BOSS_MINI_HP(15)).toBe(90 + 240);
     expect(BOSS_MINI_HP(15)).toBeGreaterThan(BOSS_MINI_HP(5));
   });
 
   it('giant boss HP grows linearly with wave and outpaces the mini', () => {
-    expect(BOSS_GIANT_HP(10)).toBe(50 + 30);
+    expect(BOSS_GIANT_HP(10)).toBe(220 + 340);
     for (const w of [10, 20, 50]) {
       expect(BOSS_GIANT_HP(w)).toBeGreaterThan(BOSS_MINI_HP(w));
     }
@@ -457,7 +505,12 @@ describe('camera shake', () => {
 
   it('quotes every hit against an intensity the game actually uses', () => {
     expect(SHAKE_REF).toBeGreaterThan(0);
-    expect(SHAKE_MAX).toBeGreaterThanOrEqual(BOMB_SHAKE);
+    // Shake is a DAMAGE-ONLY channel now, and the hardest hit in the game is
+    // losing a heart (`takeHit`, 0.28) — which is exactly the reference the
+    // amplitude is quoted at. If a future change makes something shake harder
+    // than the reference, the ceiling has to move with it or the clamp starts
+    // silently eating intensity.
+    expect(SHAKE_MAX).toBe(SHAKE_REF);
   });
 });
 

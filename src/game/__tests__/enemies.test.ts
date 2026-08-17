@@ -395,16 +395,6 @@ describe('fire behaviours', () => {
     expect(c.windup).toBe(0);
   });
 
-  it('a mine layer drops a slow, long-lived mine straight down', () => {
-    const c = baseCard();
-    applyArchetype(c, 'layer', undefined, 16);
-    const { ctx, shots } = makeCtx();
-    fireUntilShots(c, ctx, shots);
-    expect(shots[0].mine).toBe(true);
-    expect(shots[0].vx).toBe(0);
-    expect(shots[0].vy).toBeGreaterThan(0);
-    expect(shots[0].vy).toBeLessThan(100); // it drifts, it doesn't fly
-  });
 });
 
 describe('death effects', () => {

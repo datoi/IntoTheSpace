@@ -46,12 +46,30 @@ const track = (size: number, em: number): number => Math.round(size * em * 100) 
  * for labels.
  */
 export const TYPE = {
-  /** Game-over score. The single biggest thing in the app. */
+  /**
+   * Game-over score. The single biggest thing in the app.
+   *
+   * `lineHeight` MUST NOT drop below `fontSize`. React Native clips a glyph to
+   * its line box, so a line box shorter than the em box shears the tops off the
+   * digits — and at this size that is the most visible text in the game. This
+   * was set to `fontSize * 0.94` for tight display leading, which already cropped
+   * slightly; the consumer then overrode `fontSize` to 80 while inheriting the
+   * lineHeight computed for 72, taking the ratio to 0.85 and cutting the caps
+   * off outright.
+   *
+   * Tight leading buys nothing here anyway: the score is always ONE line, so
+   * there is no second line for the leading to pull closer. 1.1 leaves room for
+   * both the digit tops and the comma's descender.
+   *
+   * Everything is derived from one size so the two can never desync again — if
+   * this number changes, do not override `fontSize` at the call site, change it
+   * here.
+   */
   displayXl: {
     fontFamily: FONTS.display,
-    fontSize: 72,
-    lineHeight: 72 * 0.94,
-    letterSpacing: track(72, -0.025),
+    fontSize: 80,
+    lineHeight: 80 * 1.1,
+    letterSpacing: track(80, -0.025),
   },
   /** Screen titles and the wordmark. */
   displayL: {

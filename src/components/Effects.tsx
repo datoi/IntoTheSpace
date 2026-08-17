@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, Animated, Easing } from 'react-native';
 import { GunKind, FloatText } from '../game/types';
 import { ActiveBoons, BOONS, TIMED_BOONS } from '../game/pickups';
+import { bossPhaseCount } from '../game/bosses';
 import {
   PALETTE,
   GUN_LABEL,
@@ -281,7 +282,11 @@ export const BossBar = React.memo(function BossBar({
   kind: 'mini' | 'giant';
 }) {
   const frac = Math.max(0, Math.min(1, hp / Math.max(1, maxHp)));
-  const blocks = kind === 'giant' ? 3 : 1;
+  // Segment count comes from the PHASE TABLE, not a literal. The bar used to
+  // hardcode 3-for-giant / 1-for-mini and the simulation had no phases at all,
+  // so it drew an escalation that never happened. Reading BOSS_PHASES means the
+  // blocks and the boss's actual behaviour can no longer disagree.
+  const blocks = bossPhaseCount(kind);
   // Which phase block the boss is currently inside, counting down from the top.
   const phase = Math.max(1, Math.ceil(frac * blocks));
   const ghost = useRef(new Animated.Value(frac)).current;

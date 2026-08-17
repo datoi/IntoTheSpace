@@ -17,6 +17,8 @@ import {
   laneX,
   AVATAR_Y,
   AVATAR_SIZE,
+  AVATAR_HULL_CY,
+  AVATAR_HIT_H,
   OB_HIT,
   ENEMY_SHIPS,
   BACKGROUNDS,
@@ -120,6 +122,15 @@ const countImages = (source: unknown): number => {
   return n;
 };
 
+/**
+ * The hurtbox's top edge.
+ *
+ * DERIVED, not hardcoded. This used to be spelled `AVATAR_Y + 6`, which quietly
+ * baked in where the box sat back when it hung below the sprite — so recentring
+ * it on the drawn hull turned every "near miss" fixture into a direct hit.
+ */
+const HURT_TOP = AVATAR_Y + AVATAR_HULL_CY - AVATAR_HIT_H / 2;
+
 /** A row of 1-HP enemies stacked in the player's lane, fed to the auto-guns. */
 const feeder = (count: number): Card[] =>
   Array.from({ length: count }, (_, i) =>
@@ -170,7 +181,7 @@ describe('graze', () => {
     bullet({
       x: laneX(1),
       // Just above the player's box, inside the pad but not touching.
-      y: AVATAR_Y + 6 - GRAZE_PAD * 0.5,
+      y: HURT_TOP - GRAZE_PAD * 0.5,
       vx: 0,
       vy: 0,
     });
@@ -209,7 +220,7 @@ describe('graze', () => {
     const shots = Array.from({ length: 40 }, (_, i) =>
       bullet({
         x: laneX(1) - 60 + i * 3,
-        y: AVATAR_Y + 6 - GRAZE_PAD * 0.5,
+        y: HURT_TOP - GRAZE_PAD * 0.5,
         vx: 40,
         vy: 0,
       })

@@ -52,8 +52,7 @@ export type FireKind =
   | 'shotgun' // a wide spread
   | 'spiral' // rotating fan, ignores where the player is
   | 'sniper' // long wind-up, then one fast shot
-  | 'missile' // slow locking rocket
-  | 'mine'; // drops a slow drifting hazard
+  | 'missile'; // slow locking rocket
 
 export interface ArchetypeDef {
   id: ArchKind;
@@ -96,7 +95,6 @@ export type ArchKind =
   | 'spiraller'
   | 'strafer'
   | 'blinker'
-  | 'layer'
   | 'sentinel'
   | 'seeker'
   | 'splitter';
@@ -256,20 +254,6 @@ export const ARCHETYPES: Record<ArchKind, ArchetypeDef> = {
     bounty: 3,
     desc: 'Refuses to stay put — blinks to a new column every few seconds.',
   },
-  layer: {
-    id: 'layer',
-    sprite: 9,
-    name: 'Mine Layer',
-    move: 'strafe',
-    fire: 'mine',
-    hp: 1.8,
-    size: 1.1,
-    fireEvery: 2.8,
-    weight: 7,
-    minWave: 14,
-    bounty: 4,
-    desc: 'Seeds drifting mines across the board instead of shooting at you.',
-  },
   // The 'orbit' movement and 'missile' fire behaviours were implemented in
   // stepEnemy/enemyFire but referenced by no archetype — two enemies already
   // built and shipping as dead code. These reach them.
@@ -318,6 +302,23 @@ export const ARCHETYPES: Record<ArchKind, ArchetypeDef> = {
 };
 
 export const ARCH_KINDS = Object.keys(ARCHETYPES) as ArchKind[];
+
+/**
+ * The archetype a card is running, with a fallback for one that no longer exists.
+ *
+ * `Card.arch` is PERSISTED in a run snapshot, so a save written by an older
+ * build can name an archetype this build has retired — 'layer' (the Mine Layer)
+ * was removed exactly this way. The lookup used to be a bare
+ * `ARCHETYPES[card.arch]`, which returns `undefined` for a retired name and then
+ * throws on the very next property read, out of the rAF loop, on every resume.
+ * Falling back to the grunt keeps the enemy alive as a plain hold-and-shoot
+ * drone: harmless, still killable, and the run continues.
+ *
+ * Every consumer must go through here rather than indexing ARCHETYPES directly,
+ * because the roster will change again.
+ */
+export const archDef = (card: Card): ArchetypeDef =>
+  (card.arch && ARCHETYPES[card.arch]) || ARCHETYPES.grunt;
 
 // --- Elite modifiers ---------------------------------------------------------
 
@@ -587,8 +588,6 @@ export interface EnemyShotSpec {
   life?: number;
   color?: string;
   shot?: number;
-  /** Marks a mine: drifts slowly and ignores its aim vector. */
-  mine?: boolean;
 }
 
 export interface EnemyCtx {
@@ -597,7 +596,7 @@ export interface EnemyCtx {
   playerX: number;
   playerY: number;
   wave: number;
-  /** World-fall speed, so strafers/mines can match the scene. */
+  /** World-fall speed, so strafers can match the scene. */
   worldSpeed: number;
   fire: (spec: EnemyShotSpec) => void;
 }
@@ -616,7 +615,6 @@ const ORBIT_R = 42;
 const ORBIT_FREQ = 2.1;
 const SNIPER_WINDUP = 1.1; // s of visible charge before the shot
 const SNIPER_SPEED = 520;
-const MINE_DRIFT = 42; // px/s a laid mine sinks
 const SPIRAL_STEP = 0.55; // rad the fan advances per shot
 
 /**
@@ -627,7 +625,7 @@ const SPIRAL_STEP = 0.55; // rad the fan advances per shot
  * the card is mutated in place, matching how the rest of the loop works.
  */
 export function stepEnemy(card: Card, ctx: EnemyCtx): void {
-  const def = card.arch ? ARCHETYPES[card.arch] : ARCHETYPES.grunt;
+  const def = archDef(card);
   const dt = ctx.dt;
   const sp = card.speedMult ?? 1;
   card.behaveT = (card.behaveT ?? 0) + dt;
@@ -747,7 +745,7 @@ function clampX(x: number, boxW: number): number {
  * scaling controls, and this adds each ship's own character on top.
  */
 export function enemyFire(card: Card, ctx: EnemyCtx): void {
-  const def = card.arch ? ARCHETYPES[card.arch] : ARCHETYPES.grunt;
+  const def = archDef(card);
   if (def.fire === 'none' || !card.fireEvery) return;
 
   card.fireT = (card.fireT ?? card.fireEvery) - ctx.dt;
@@ -830,24 +828,6 @@ export function enemyFire(card: Card, ctx: EnemyCtx): void {
         color,
         shot,
         life: ENEMY_HOMING_LIFE,
-      });
-      break;
-
-    case 'mine':
-      // Straight down, slowly, and it lingers — an area denial tool rather
-      // than an attack. Long life so it stays a hazard on the way past.
-      ctx.fire({
-        x: ox,
-        y: oy,
-        vx: 0,
-        vy: MINE_DRIFT,
-        kind: 'straight',
-        color: PALETTE.threat, // a mine is a hazard, not a reward
-        // No `shot`: a mine is drawn as a pulsing hazard disc on its own render
-        // path, and should not read as a missile.
-        size: ENEMY_BULLET_SIZE * 1.4,
-        life: ENEMY_BULLET_LIFE * 2.2,
-        mine: true,
       });
       break;
   }

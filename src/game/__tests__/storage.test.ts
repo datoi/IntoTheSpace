@@ -17,8 +17,8 @@ const sampleSave: SaveData = {
   likes: 42,
   unlocked: ['ironclad', 'specter'],
   selectedAvatar: 'specter',
-  unlockedBackgrounds: ['violet', 'void'],
-  selectedBackground: 'void',
+  unlockedBackgrounds: ['violet', 'azure'],
+  selectedBackground: 'azure',
 };
 
 // Minimal-but-complete run state; only fields storage cares about are shape-level.
@@ -45,6 +45,36 @@ describe('loadSave', () => {
     expect(b.unlocked).toEqual(['ironclad']);
     expect(b.best).toBe(0);
     expect(DEFAULT_SAVE.unlocked).toEqual(['ironclad']);
+  });
+
+  it('drops a background that no longer exists and re-equips one that does', async () => {
+    // Skies get retired — 'void' (Deep Void), 'crimson', 'verdant' and 'quartz'
+    // all were. A save written before that names them in `unlockedBackgrounds`
+    // and, worse, as the EQUIPPED one. Left alone that hands GameScreen an
+    // undefined parallax set on the next launch, which is a crash on boot with
+    // the bad save re-read every time — unrecoverable without clearing data.
+    await AsyncStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        ...sampleSave,
+        unlockedBackgrounds: ['violet', 'void', 'azure', 'quartz'],
+        selectedBackground: 'crimson',
+      })
+    );
+    const save = await loadSave();
+    expect(save.unlockedBackgrounds).toEqual(['violet', 'azure']);
+    // Falls back to something owned rather than to the dangling id.
+    expect(save.unlockedBackgrounds).toContain(save.selectedBackground);
+  });
+
+  it('keeps the free starter even if a save somehow owns nothing', async () => {
+    await AsyncStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({ ...sampleSave, unlockedBackgrounds: ['void'], selectedBackground: 'void' })
+    );
+    const save = await loadSave();
+    expect(save.unlockedBackgrounds).toEqual(['violet']);
+    expect(save.selectedBackground).toBe('violet');
   });
 
   it('round-trips a save written by writeSave', async () => {

@@ -121,8 +121,8 @@ export const MAX_PARTICLES = 40;
  * The particle and explosion pools were capped; the projectile arrays were not,
  * and they are the ones that GROW WITH DIFFICULTY. By wave 20 a formation is
  * twelve enemies on independent weapon clocks — scattergun archetypes throw
- * five-shot spreads, death bursts throw ten, mine layers leave shots that never
- * expire on their own — on top of the global volley and a boss fan. Each live
+ * five-shot spreads and death bursts throw ten — on top of the global volley
+ * and a boss barrage. Each live
  * shot is a native view plus a fresh style object every frame, so the one pool
  * nothing bounded was also the one that scaled fastest.
  *
@@ -375,15 +375,31 @@ export const BOMB_BTN_BOTTOM = 92; // mirrors the FIRE button on the other side
 export const BOMB_FLASH_TIME = 0.35; // s of detonation whiteout
 export const BOMB_FLASH_COLOR = PALETTE.goldHi;
 export const BOMB_FLASH_ALPHA = 0.6;
-export const BOMB_SHAKE = 0.45;
 
 // --- Camera shake -------------------------------------------------------------
 // The play field is translated by a random offset each frame while `shake` burns
 // down. Amplitude is quoted against a reference intensity so every hit in the
 // game is expressed relative to one number.
+//
+// Shake means EXACTLY ONE THING: DAMAGE ARRIVED AT THE HULL. Explosions used to
+// shake too — every enemy death, boss death, bomb, special and Nova — which
+// meant the camera was moving almost continuously during a busy wave and the
+// one event the player actually needs to feel was indistinguishable from the
+// scenery. Kills are still sold by hit-stop, particles, the pitch ladder and the
+// explosion sprite; none of those compete with damage for the same channel.
+//
+// "Damage arrived" rather than "a heart was lost", because a shield absorbing a
+// shot is the same event from the player's side — something reached them — and
+// a save that produced no physical feedback reads as a missed collision, which
+// is how a player stops trusting the shield.
+//
+// Do not add a shake to an offensive event. If a new one needs weight, spend
+// hit-stop or a flash, not the camera.
 export const SHAKE_AMP = 14; // px of travel at the reference intensity
 export const SHAKE_REF = 0.28; // the intensity SHAKE_AMP is quoted at
-export const SHAKE_MAX = 0.5; // the hardest hit there is — Nova's detonation
+export const SHAKE_MAX = 0.28; // the hardest hit there is — losing a heart
+/** A shot stopped by a shield or bulwark: felt, but well under a real hit. */
+export const SHAKE_ABSORB = 0.16;
 /**
  * How far the world can slide off its own edges at peak shake.
  *
@@ -425,17 +441,57 @@ export const BOON_EMOJI = 24; // glyph size on the badge
 // Active-boon chips are listed on the HUD under the gun readout.
 export const BOON_CHIP_MAX = 4; // most chips shown at once (oldest drop off)
 // The shield's visible bubble around the hull.
-export const SHIELD_RING = 78;
+//
+// Must CLEAR the drawn hull (AVATAR_HULL_D ≈ 81px). It was 78 — narrower than
+// the ship it was supposed to be containing — so the wingtips sat outside the
+// hoop even once the centring was fixed. Kept under BULWARK_RING so the shell
+// still reads as the heavier of the two. Guarded by a test, because the two
+// numbers are declared hundreds of lines apart and neither knows about the other.
+export const SHIELD_RING = 92;
 export const SHIELD_COLOR = PALETTE.plasma; // the player's own shield
+/**
+ * How many hits a shield absorbs before it shatters.
+ *
+ * A shield used to be blanket invulnerability for its whole duration, which
+ * meant the correct play while it held was to stop dodging altogether — the
+ * pickup deleted the game for six seconds and then handed it back. A budget
+ * keeps the save worth having without ever making the board safe to ignore, and
+ * it gives the boon a second failure state the player can actually feel.
+ *
+ * Three is deliberate: enough that one unlucky clip doesn't waste the pickup,
+ * few enough that flying into a curtain still costs you the shield.
+ */
+export const SHIELD_HITS = 3;
 
 // --- Elite enemies ------------------------------------------------------------
 export const ELITE_AURA_SCALE = 1.5; // aura diameter against the enemy's hitbox
 export const ELITE_AURA_ALPHA = 0.26;
 // A sniper's charge-up telegraph: a growing bright ring so the fast shot that
 // follows is always earned rather than a surprise.
-export const WINDUP_RING = 40;
-// Laid mines pulse so they read as live hazards rather than spent shots.
-export const MINE_PULSE_FREQ = 6;
+/**
+ * The charge tell, expressed as a FRACTION of the sprite it sits on.
+ *
+ * It used to be a flat 40px, which silently assumed every winding-up enemy was
+ * OB_VIS (50px) wide. That held while the Sniper was the only user; the moment
+ * a boss needed one, 40px would have been drawn *inside* a 168px giant and
+ * shown nothing. 0.8 reproduces the Sniper's original 40px exactly
+ * (0.8 × OB_VIS), so this is a generalisation, not a retune.
+ */
+export const WINDUP_RING_SCALE = 0.8;
+/**
+ * How much wider the ring starts, per second of charge remaining.
+ *
+ * The ring TIGHTENS onto the hull as the shot comes due, which is what makes it
+ * a timer rather than a warning light — it used to be a static circle that
+ * blinked on and off, carrying no information about *when* the shot would land
+ * despite three comments describing it as growing. A longer charge visibly
+ * starts wider, so a Sniper's 1.1s wind-up and a boss's 0.75s read as different
+ * lengths without either needing to know the other's duration.
+ */
+export const WINDUP_RING_GROW = 0.5;
+/** Opacity lost per second of charge remaining — it brightens as it closes. */
+export const WINDUP_RING_FADE = 0.3;
+export const WINDUP_RING_WIDTH = 2.5;
 
 // --- Per-enemy fire ----------------------------------------------------------
 // Archetypes run their own weapon clocks (see enemies.ts) ON TOP of the global
@@ -557,10 +613,47 @@ export const BOSS_MINI_VIS = 104; // rendered size (px)
 export const BOSS_MINI_HIT = 82; // hitbox (forgiving, smaller than the visual)
 export const BOSS_GIANT_VIS = 168;
 export const BOSS_GIANT_HIT = 132;
-export const BOSS_MINI_HP = (wave: number) => 22 + wave * 2;
-export const BOSS_GIANT_HP = (wave: number) => 50 + wave * 3;
+/**
+ * Boss health. Bosses are meant to be an ORDEAL.
+ *
+ * These are large on purpose, and the per-wave slope is steep on purpose: an
+ * early mini should be a real fight, and a late giant should be the hardest
+ * thing in the run by a distance.
+ *
+ * The honest risk of numbers this size is the one every long boss has — that
+ * it becomes a slog. The mitigation is NOT smaller numbers, it is that the
+ * health is subdivided into many phases (3 for a mini, 5 for a giant; see
+ * BOSS_PHASES) and every one of them changes the attack AND the movement. A
+ * player is never doing the same thing for more than a fifth of the bar, so the
+ * length reads as an escalating fight rather than one long health bar.
+ *
+ * Rough fight lengths, at ~3 damage/second (single gun, ZERO upgrades — the
+ * floor, not the expectation):
+ *
+ *   mini  w5  = 170 hp  ~57s        giant w10 = 560 hp  ~3m
+ *   mini  w15 = 330 hp  ~110s       giant w20 = 900 hp  ~5m
+ *
+ * Those floor numbers are deliberately brutal. A player who has actually spent
+ * their coins runs 4–8× that damage (dmgMult stacks with fireIntervalMult, and
+ * gun levels add parallel shots), which brings a giant back to well under a
+ * minute. That gap IS the design: upgrades are what a boss measures.
+ */
+export const BOSS_MINI_HP = (wave: number) => 90 + wave * 16;
+export const BOSS_GIANT_HP = (wave: number) => 220 + wave * 34;
+// Baseline sway. Each boss phase scales these — see BOSS_PHASES in bosses.ts.
 export const BOSS_SWAY_AMP = 0.3; // fraction of screen width the boss sways from center
 export const BOSS_SWAY_FREQ = 0.7; // rad/s
+/**
+ * How fast the sway's WIDTH eases toward a new phase's target, per second.
+ *
+ * The phase multipliers step the instant health crosses a band. Sway SPEED is
+ * made continuous by accumulating the sine's phase (see bossSway) — but width
+ * multiplies the sine directly, so stepping it would still pop the boss
+ * sideways by up to ~34px at the extremes of its arc. Easing spends about half a
+ * second widening instead, which also reads better: the boss winds up into its
+ * new phase rather than snapping into it.
+ */
+export const BOSS_SWAY_AMP_LERP = 2.5;
 
 // --- Gun power-up projectiles (from the laser/bullet FX pack). Each falling
 // pickup wears its gun's own shot art so you can read what it grants before
@@ -577,6 +670,66 @@ export const SHOT_HOMING_IMG = require('../../assets/bullets/gun_rocket.png'); /
 export const ENEMY_SHIP_VIS = 56;
 export const AVATAR_IMG_W = 56;
 export const AVATAR_IMG_H = 64;
+
+// --- Where the hull is actually DRAWN ----------------------------------------
+// The rocket view is parked at the origin and moved entirely by transform, so
+// these four numbers are what decide where the sprite lands. They were inline
+// literals in GameScreen's render; they live here because anything drawn AROUND
+// the ship has to agree with them, and nothing could agree with a magic number
+// it could not see.
+export const AVATAR_ART_SCALE = 1.45; // the hull is drawn 45% larger than its box
+export const AVATAR_ART_DX = -36; // half the 72-wide rocket view, centring it on avatarX
+export const AVATAR_ART_DY = -22; // lifts the sprite, so the nose leads the hitbox
+export const AVATAR_ART_MARGIN = 2; // jetImg's own margin inside that view
+
+/** The rocket view's laid-out height: its margin plus the image box. */
+const AVATAR_VIEW_H = AVATAR_ART_MARGIN + AVATAR_IMG_H;
+
+/**
+ * Y offset from `avatarY` to the CENTRE OF THE DRAWN HULL.
+ *
+ * NOT the same as the hitbox centre (`avatarY + AVATAR_SIZE / 2`), and that gap
+ * is the entire reason this exists. The hitbox is deliberately small and sits
+ * low; the sprite is drawn larger and lifted. The two centres are ~15px apart,
+ * so a hoop centred on the hitbox renders visibly BEHIND the ship — nose out
+ * the front, bubble trailing at the back. That is what the shield did.
+ *
+ * Derived rather than measured so it cannot drift when the render is retuned:
+ * the transform puts the view's centre at `avatarY + AVATAR_ART_DY + h / 2`,
+ * and the image box sits fractionally below that centre before the scale
+ * multiplies the difference.
+ *
+ * Safe against `resizeMode="contain"`: contain CENTRES the art in its box, so
+ * the drawn hull's centre is the box's centre whatever the source aspect is.
+ */
+export const AVATAR_HULL_CY =
+  AVATAR_ART_DY +
+  AVATAR_VIEW_H / 2 +
+  (AVATAR_ART_MARGIN + AVATAR_IMG_H / 2 - AVATAR_VIEW_H / 2) * AVATAR_ART_SCALE;
+
+/**
+ * The drawn hull's diameter.
+ *
+ * Every hull sprite is square source art, so `contain` fits it to the SHORTER
+ * side of the image box before the scale is applied — the hull is 56×56 drawn,
+ * not 56×64. Anything meant to enclose the ship has to clear this.
+ */
+export const AVATAR_HULL_D = Math.min(AVATAR_IMG_W, AVATAR_IMG_H) * AVATAR_ART_SCALE;
+
+/**
+ * The player's hurtbox — centred on AVATAR_HULL_CY, like everything else.
+ *
+ * Deliberately far smaller than the drawn hull (~81px). That gap is genre
+ * convention and it is what makes dense patterns survivable: the ship you see is
+ * the fantasy, the box that can actually be hit is a fraction of it.
+ *
+ * The SIZE here is unchanged from the box this replaced (44×44) — only its
+ * centre moved. It used to hang ~15px below the sprite, so its lower edge sat in
+ * empty space under the ship and collected shots that visually passed
+ * underneath, while the nose was unhittable. Same area, honest position.
+ */
+export const AVATAR_HIT_W = AVATAR_SIZE - 12;
+export const AVATAR_HIT_H = AVATAR_SIZE - 12;
 // The power-up shots are drawn the same length as the default bolt
 // (PLAYER_SHOT_LEN = 62), each at its own source aspect.
 // Bomb: an amber blast starburst (radial, ~134×143). The heavy hitter — drawn
@@ -697,9 +850,8 @@ export const ENEMY_SHOT_ASPECT = [
  * didn't already. Now the shot in flight identifies who fired it even after the
  * shooter is off-screen or dead.
  *
- * Two entries are never rendered and are aliases rather than their own art:
- * Kamikaze has `fire: 'none'`, and the Mine Layer's mines are drawn as pulsing
- * hazard discs on their own render path.
+ * One entry is never rendered and is an alias rather than its own art:
+ * Kamikaze has `fire: 'none'`.
  */
 export const ENEMY_SHOT_FOR_ARCH: Record<ArchKind, number> = {
   grunt: 0,
@@ -713,7 +865,6 @@ export const ENEMY_SHOT_FOR_ARCH: Record<ArchKind, number> = {
   spiraller: 7,
   strafer: 8,
   blinker: 9,
-  layer: 0, // mines are drawn, not sprited
   sentinel: 10,
   seeker: 11,
   splitter: 12,
@@ -786,21 +937,20 @@ export const PLANET_SPEED = 0.04;
 export const PLANET_SPACING = SCREEN.H * 0.58; // vertical gap between planets → 2+ on screen at once
 
 // Planet sprites (SBS 2D Planet Pack, shaded 512 → 256).
+//
+// Only the worlds the three surviving skies actually place. Six more shipped
+// with the pack and were dropped along with the backgrounds that used them —
+// a `require` here is what pulls a file into the bundle, so an unplaced planet
+// is pure download weight.
 const PLANET_REDGIANT = require('../../assets/background/planet_redgiant.png');
 const PLANET_ORANGE = require('../../assets/background/planet_orange.png');
-const PLANET_TERRESTRIAL = require('../../assets/background/planet_terrestrial.png');
 const PLANET_GLACIAL = require('../../assets/background/planet_glacial.png');
-const PLANET_GREENGIANT = require('../../assets/background/planet_greengiant.png');
 const PLANET_MAGMA = require('../../assets/background/planet_magma.png');
-const PLANET_OCEAN = require('../../assets/background/planet_ocean.png');
 const PLANET_LUNAR = require('../../assets/background/planet_lunar.png');
 const PLANET_ARID = require('../../assets/background/planet_arid.png');
 const PLANET_BARREN = require('../../assets/background/planet_barren.png');
-const PLANET_YELLOWGIANT = require('../../assets/background/planet_yellowgiant.png');
 const PLANET_AQUAMARINE = require('../../assets/background/planet_aquamarine.png');
 const PLANET_BLUEGIANT = require('../../assets/background/planet_bluegiant.png');
-const PLANET_LUSH = require('../../assets/background/planet_lush.png');
-const PLANET_ICY = require('../../assets/background/planet_icy.png');
 
 // --- The starfield ------------------------------------------------------------
 //
@@ -883,7 +1033,6 @@ const SBS_STARS_MID = require('../../assets/background/sbs_stars_mid.png');
 const SBS_STARS_NEAR = require('../../assets/background/sbs_stars_near.png');
 const SBS_PURPLE = require('../../assets/background/sbs_purple.png');
 const SBS_BLUE = require('../../assets/background/sbs_blue.png');
-const SBS_GREEN = require('../../assets/background/sbs_green.png');
 const sbsSet = (nebula: number): BgSet => ({
   aspect: 1,
   mirror: false,
@@ -953,28 +1102,6 @@ export const BACKGROUNDS: BackgroundDef[] = [
     },
   },
   {
-    id: 'void',
-    name: 'Deep Void', // void_02 — near-black quiet starfield
-    price: 90,
-    preview: require('../../assets/background/bg1_base.jpg'),
-    set: {
-      ...spbgSet(
-        require('../../assets/background/bg1_base.jpg'),
-        require('../../assets/background/bg1_far.jpg'),
-        require('../../assets/background/bg1_mid.jpg'),
-        require('../../assets/background/bg1_near.jpg')
-      ),
-      // Bright worlds, brilliant against the near-black void.
-      planet: {
-        items: [
-          { src: PLANET_TERRESTRIAL, xFrac: 0.68, sizeFrac: 0.22, opacity: 0.55 }, // near
-          { src: PLANET_OCEAN, xFrac: 0.3, sizeFrac: 0.11, opacity: 0.47 }, // far
-          { src: PLANET_YELLOWGIANT, xFrac: 0.55, sizeFrac: 0.15, opacity: 0.52 }, // mid
-        ],
-      },
-    },
-  },
-  {
     id: 'ember',
     name: 'Ember Reach', // stellar_03 — orange wisps on blue-grey
     price: 240,
@@ -992,67 +1119,6 @@ export const BACKGROUNDS: BackgroundDef[] = [
           { src: PLANET_GLACIAL, xFrac: 0.3, sizeFrac: 0.21, opacity: 0.55 }, // near
           { src: PLANET_AQUAMARINE, xFrac: 0.7, sizeFrac: 0.11, opacity: 0.45 }, // far
           { src: PLANET_BLUEGIANT, xFrac: 0.5, sizeFrac: 0.15, opacity: 0.5 }, // mid
-        ],
-      },
-    },
-  },
-  {
-    id: 'crimson',
-    name: 'Crimson Cloud', // stellar_01 — red/rust nebula (the showpiece)
-    price: 450,
-    preview: require('../../assets/background/bg0_base.jpg'),
-    set: {
-      ...spbgSet(
-        require('../../assets/background/bg0_base.jpg'),
-        require('../../assets/background/bg0_far.jpg'),
-        require('../../assets/background/bg0_mid.jpg'),
-        require('../../assets/background/bg0_near.jpg')
-      ),
-      // Cool/green worlds against the red/rust nebula.
-      planet: {
-        items: [
-          { src: PLANET_GREENGIANT, xFrac: 0.7, sizeFrac: 0.21, opacity: 0.55 }, // near
-          { src: PLANET_LUSH, xFrac: 0.3, sizeFrac: 0.11, opacity: 0.45 }, // far
-          { src: PLANET_GLACIAL, xFrac: 0.52, sizeFrac: 0.15, opacity: 0.5 }, // mid
-        ],
-      },
-    },
-  },
-  {
-    id: 'verdant',
-    name: 'Verdant Aurora', // vivid green aurora
-    price: 300,
-    preview: SBS_GREEN,
-    // Warm worlds against the green aurora.
-    set: {
-      ...sbsSet(SBS_GREEN),
-      planet: {
-        items: [
-          { src: PLANET_MAGMA, xFrac: 0.28, sizeFrac: 0.2, opacity: 0.55 }, // near
-          { src: PLANET_REDGIANT, xFrac: 0.7, sizeFrac: 0.11, opacity: 0.45 }, // far
-          { src: PLANET_BARREN, xFrac: 0.5, sizeFrac: 0.14, opacity: 0.5 }, // mid
-        ],
-      },
-    },
-  },
-  {
-    id: 'quartz',
-    name: 'Rose Quartz', // stellar_05 — dusty pink/blue clouds
-    price: 180,
-    preview: require('../../assets/background/bg3_base.jpg'),
-    set: {
-      ...spbgSet(
-        require('../../assets/background/bg3_base.jpg'),
-        require('../../assets/background/bg3_far.jpg'),
-        require('../../assets/background/bg3_mid.jpg'),
-        require('../../assets/background/bg3_near.jpg')
-      ),
-      // Blue/cool worlds amid the dusty pink clouds.
-      planet: {
-        items: [
-          { src: PLANET_OCEAN, xFrac: 0.68, sizeFrac: 0.21, opacity: 0.55 }, // near
-          { src: PLANET_TERRESTRIAL, xFrac: 0.3, sizeFrac: 0.11, opacity: 0.47 }, // far
-          { src: PLANET_ICY, xFrac: 0.52, sizeFrac: 0.15, opacity: 0.51 }, // mid
         ],
       },
     },

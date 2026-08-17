@@ -36,11 +36,37 @@ export interface Card {
   holdY?: number; // formation hold position for wave enemies (undefined = falls)
   shipIdx?: number; // enemy ship art tier (index into ENEMY_SHIPS; missing = 0)
   boss?: 'mini' | 'giant'; // boss waves: a single big shooty monster
+  /**
+   * The phase index this boss was last seen in.
+   *
+   * The phase ITSELF is derived from health every frame (see bosses.ts), so
+   * this exists only to spot the transition and fire the feedback for it once.
+   * Absent on a card from an older save, in which case the first frame after a
+   * resume adopts whatever phase the boss is already in SILENTLY — a resume is
+   * not a transition, and announcing one the player never crossed would be a
+   * lie about what just happened.
+   */
+  bossPhaseSeen?: number;
   gun?: GunKind; // 'gift' drops: which gun it grants, decided at spawn so the
   // pickup can show that gun's own art instead of a mystery box
   w?: number; // hitbox width override (bosses; others derive from kind)
-  swayT0?: number; // bosses: elapsed time when the sway began, so it starts
-  // centered on the descent point instead of mid-swing
+  /**
+   * Bosses: the sway sine's accumulated PHASE, in radians.
+   *
+   * Integrated per frame rather than derived from run time. The phase table
+   * scales sway SPEED, and a multiplier applied to absolute time jumps the
+   * sine's argument by `t × Δmult` the instant health crosses a band — a
+   * discontinuity that GROWS with fight length, and which teleported a giant up
+   * to 79% of the screen sideways on its last transition. Integrating a rate
+   * cannot do that: changing the rate changes where the phase goes next, never
+   * where it already is.
+   *
+   * Starting at 0 also means a boss opens its sway at screen centre, which is
+   * what stops it snapping sideways the frame it stops descending.
+   */
+  swayPhase?: number;
+  /** Bosses: current sway width, eased toward the phase's target. */
+  swayAmp?: number;
   charging?: boolean; // wave 20+: a wounded enemy dives at the player
   cx?: number; // free x while charging (otherwise laneX(lane))
   dead: boolean; // collected or resolved (kept briefly for pop animation)
@@ -114,7 +140,6 @@ export interface EnemyBullet {
   phase: number; // zigzag offset
   life: number; // seconds before it fizzles (bounds homing shots)
   shot?: number; // index into ENEMY_SHOTS, set from the shooter's archetype (undefined = plain dot)
-  mine?: boolean; // a laid mine: drifts slowly, drawn as a pulsing hazard disc
   ownerId?: number; // the enemy that fired it, so a Vampiric elite can heal on a
   // landed hit (looked up by id — the owner may already be dead, in which case
   // the heal simply doesn't happen)
@@ -194,6 +219,15 @@ export interface GameState {
   specialCharge: number;
   bulwarkTime: number; // Ironclad: seconds of shell left
   bulwarkLeft: number; // reflected shots still available this activation
+  /**
+   * Hits the SHIELD BOON can still absorb before it shatters (see SHIELD_HITS).
+   *
+   * Separate from the boon's own countdown in `boons.shield`: the shield ends on
+   * whichever runs out first, time or hits. Shattering deletes the boon, so
+   * "shield active with zero budget" never occurs in play — a resumed run in
+   * that state is a snapshot from before the budget existed.
+   */
+  shieldLeft: number;
   phantomTime: number; // Specter: seconds of ghost wingmen left
   talonTime: number; // Raptor: seconds of claw barrage left
   talonTimer: number; // Raptor: seconds until the next fan in that barrage

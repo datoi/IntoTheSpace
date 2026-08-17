@@ -13,6 +13,8 @@ import {
   AVATARS,
   COIN_GOLD,
   PALETTE,
+  BOSS_GIANT_VIS,
+  WINDUP_RING_SCALE,
 } from '../../game/constants';
 
 const baseCard: Card = {
@@ -120,6 +122,79 @@ describe('ObstacleView — bosses', () => {
   it('renders the giant boss art', async () => {
     await render(<ObstacleView ob={{ ...baseCard, boss: 'giant', w: 132, hp: 80, maxHp: 80 }} />);
     expect(findImages()[0].props.source).toBe(BOSS_GIANT_IMG);
+  });
+});
+
+describe('ObstacleView — the wind-up telegraph', () => {
+  // REGRESSION. The boss branch of ObstacleView returns early, and the ring
+  // used to exist only in the non-boss tree below that return. So a boss set
+  // `windup` faithfully, bosses.ts rested its whole fairness argument on the
+  // ring, and nothing was ever drawn — the giant's final phase threw an
+  // unannounced 7-shot aimed salvo.
+  //
+  // It survived a green suite because every existing test asserted `card.windup`
+  // was SET. A telegraph is a claim about what the player can SEE, so these
+  // assert on the RENDER.
+
+  /** Circular bordered views — the ring's geometry, whatever its size. */
+  const findRings = (): any[] => {
+    const out: any[] = [];
+    const walk = (node: any) => {
+      if (!node || typeof node !== 'object') return;
+      const s = flatten(node.props?.style);
+      if (s.borderRadius && s.borderWidth && s.borderColor === PALETTE.threat) out.push(s);
+      (node.children ?? []).forEach(walk);
+    };
+    walk(screen.toJSON());
+    return out;
+  };
+
+  it('draws the ring for a winding-up sniper', async () => {
+    await render(<ObstacleView ob={{ ...baseCard, windup: 0.5 }} />);
+    expect(findRings()).toHaveLength(1);
+  });
+
+  it('draws the ring for a winding-up giant boss', async () => {
+    await render(
+      <ObstacleView ob={{ ...baseCard, boss: 'giant', w: 132, hp: 40, maxHp: 120, windup: 0.5 }} />
+    );
+    expect(findRings()).toHaveLength(1);
+  });
+
+  it('draws nothing when nothing is charging', async () => {
+    await render(<ObstacleView ob={{ ...baseCard, boss: 'giant', w: 132, hp: 40, maxHp: 120 }} />);
+    expect(findRings()).toHaveLength(0);
+    await render(<ObstacleView ob={{ ...baseCard }} />);
+    expect(findRings()).toHaveLength(0);
+  });
+
+  it('scales the ring to the sprite instead of a fixed 40px box', async () => {
+    // The original flat 40px assumed every charging enemy was OB_VIS wide. On a
+    // 168px giant that would have drawn the tell INSIDE the hull, visible to
+    // nobody — so size has to track the sprite or the fix is cosmetic only.
+    await render(<ObstacleView ob={{ ...baseCard, windup: 0.5 }} />);
+    const sniper = findRings()[0].width;
+
+    await render(
+      <ObstacleView ob={{ ...baseCard, boss: 'giant', w: 132, hp: 40, maxHp: 120, windup: 0.5 }} />
+    );
+    const giant = findRings()[0].width;
+
+    expect(sniper).toBeCloseTo(OB_VIS * WINDUP_RING_SCALE, 5);
+    expect(giant).toBeCloseTo(BOSS_GIANT_VIS * WINDUP_RING_SCALE, 5);
+    expect(giant).toBeGreaterThan(sniper * 2); // and it is not a token difference
+  });
+
+  it('tightens as the shot comes due, so the ring is a timer', async () => {
+    // A binary on/off ring says "something is coming" but never "now", which is
+    // the only part the player can act on.
+    await render(<ObstacleView ob={{ ...baseCard, windup: 0.7 }} />);
+    const early = flatten(findRings()[0].transform)?.scale ?? findRings()[0].transform[0].scale;
+
+    await render(<ObstacleView ob={{ ...baseCard, windup: 0.1 }} />);
+    const late = flatten(findRings()[0].transform)?.scale ?? findRings()[0].transform[0].scale;
+
+    expect(late).toBeLessThan(early);
   });
 });
 

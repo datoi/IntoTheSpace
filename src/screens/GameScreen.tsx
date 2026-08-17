@@ -105,6 +105,7 @@ import {
   SHAKE_AMP,
   SHAKE_REF,
   SHAKE_MAX,
+  SHAKE_ABSORB,
   SHAKE_MAX_PX,
   PLANET_SPEED,
   PLANET_SPACING,
@@ -113,8 +114,6 @@ import {
   BOSS_GIANT_HIT,
   BOSS_MINI_HP,
   BOSS_GIANT_HP,
-  BOSS_SWAY_AMP,
-  BOSS_SWAY_FREQ,
   SHOT_HOMING_IMG,
   SHOT_BOMB_IMG,
   SHOT_LASER_IMG,
@@ -130,7 +129,6 @@ import {
   ENEMY_SHOTS,
   ENEMY_SHOT_ASPECT,
   enemyShotFor,
-  BOSS_SHOT,
   PLAYER_SHOT_LEN,
   ShotArt,
   GUN_LABEL,
@@ -194,16 +192,21 @@ import {
   CRIT_COLOR,
   BOON_EVERY,
   BOMB_FLASH_TIME,
-  BOMB_SHAKE,
   BOMB_FLASH_COLOR,
   BOMB_FLASH_ALPHA,
   BOMB_BTN_SIZE,
   BOMB_BTN_LEFT,
   BOMB_BTN_BOTTOM,
   VOLLEY_DAMPEN,
-  MINE_PULSE_FREQ,
   SHIELD_RING,
   SHIELD_COLOR,
+  SHIELD_HITS,
+  AVATAR_HULL_CY,
+  AVATAR_HIT_W,
+  AVATAR_HIT_H,
+  AVATAR_ART_SCALE,
+  AVATAR_ART_DX,
+  AVATAR_ART_DY,
   ENERGY_PER_KILL,
   ENERGY_PER_ELITE,
   ENERGY_PER_BOSS,
@@ -251,6 +254,7 @@ import {
   rollBoon,
   tickBoons,
 } from '../game/pickups';
+import { bossFire, bossSway, bossPhaseIndex } from '../game/bosses';
 import {
   ARCHETYPES,
   ELITES,
@@ -294,6 +298,20 @@ const isHazard = (c: Card) => !c.dead && c.kind === 'rage';
 
 // Effective center x: a charging enemy moves freely; otherwise it's lane-locked.
 const cardX = (c: Card) => c.cx ?? laneX(c.lane);
+
+/**
+ * Where the player IS — the centre of the drawn hull.
+ *
+ * One definition for every consumer: the hurtbox, what enemies aim at, what a
+ * rocket tracks, what a charger dives at, what a magnet pulls toward, and where
+ * hull effects originate. These all used `avatarY + AVATAR_SIZE / 2`, the
+ * HITBOX centre, which sits ~15px below the sprite — so enemies aimed under the
+ * ship and the box that caught their shots was hanging below it to match.
+ *
+ * Both halves have to move together. Recentring the hurtbox while leaving the
+ * aim points where they were would make aimed fire systematically miss.
+ */
+const hullY = (s: GameState) => s.avatarY + AVATAR_HULL_CY;
 
 // The hazard closest to the player (largest y still above the given point),
 // optionally skipping ones another rocket has already locked onto.
@@ -535,9 +553,6 @@ function BulwarkShell({ x, y, time, over }: { x: number; y: number; time: number
   );
 }
 
-// How far from the avatar's center a touch still counts as grabbing it.
-const GRAB_RADIUS = 80;
-
 // --- Why everything below is placed with `transform`, never `left`/`top` -----
 //
 // Every entity on the board moves every frame. `left`/`top` are LAYOUT props:
@@ -581,6 +596,13 @@ export default function GameScreen({
           ...resume,
           bombCap: shipStats.bombCapacity,
           bombs: Math.min(resume.bombs ?? shipStats.bombCapacity, shipStats.bombCapacity),
+          // A run saved before the shield had a hit budget carries a live shield
+          // boon and no `shieldLeft`, which would spread to 0 and leave the hoop
+          // drawn but inert — the worst possible state, because it looks like
+          // protection. Shattering DELETES the boon, so "active with no budget"
+          // is unreachable in play and safe to read as "pre-budget snapshot".
+          shieldLeft:
+            resume.shieldLeft ?? (boonActive(resume.boons, 'shield') ? SHIELD_HITS : 0),
         }
       : fresh(shipStats)
   );
@@ -706,8 +728,30 @@ export default function GameScreen({
     return () => sub.remove();
   }, [onPersist]);
 
-  // Touch the rocket to grab it; it sticks to the finger (keeping the grab
-  // offset) and follows it anywhere until released.
+  // --- Steering: touch ANYWHERE, and the hull follows your finger ------------
+  //
+  // Touching the rocket itself is not required. A touch anywhere on the play
+  // field grabs it, and it then tracks your finger's MOVEMENT — not your
+  // finger's position.
+  //
+  // That distinction is the whole control scheme, so it's worth being explicit
+  // about why it isn't the more obvious "put the ship under the finger":
+  //
+  //   - The ship would teleport on every touch. Tapping anywhere to reposition
+  //     your grip would yank the hull across the board, very often straight into
+  //     fire it had already dodged. In a game where one contact costs a heart
+  //     that is the single worst thing an input scheme can do.
+  //   - Your thumb would cover the thing you are trying to aim. On a phone the
+  //     hull is roughly a fingertip wide.
+  //
+  // Tracking movement instead means the grab offset is whatever it happens to
+  // be, the hull never jumps, and you can steer from a corner of the screen
+  // where your hand isn't in the way — which is why this is what the genre
+  // settled on.
+  //
+  // `dragDX`/`dragDY` already existed for exactly this; the only thing that
+  // used to stand in the way was a GRAB_RADIUS test that required the touch to
+  // land within 80px of the hull.
   const pan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => !pausedRef.current,
@@ -715,17 +759,18 @@ export default function GameScreen({
       onPanResponderGrant: (evt) => {
         const s = g.current;
         const { pageX, pageY } = evt.nativeEvent;
-        const cx = s.avatarX;
-        const cy = s.avatarY + AVATAR_SIZE / 2;
-        if (Math.hypot(pageX - cx, pageY - cy) <= GRAB_RADIUS) {
-          s.dragging = true;
-          s.dragDX = s.avatarX - pageX;
-          s.dragDY = s.avatarY - pageY;
-          s.targetX = s.avatarX;
-          s.targetY = s.avatarY;
-          play('whoosh', 0.5);
-          haptic(HapticWeight.Light, 'selection');
-        }
+        s.dragging = true;
+        // The offset the hull holds for the life of this drag. Taken from
+        // wherever the finger landed, so the hull stays exactly where it is.
+        s.dragDX = s.avatarX - pageX;
+        s.dragDY = s.avatarY - pageY;
+        s.targetX = s.avatarX;
+        s.targetY = s.avatarY;
+        // Deliberately no sound or haptic on grab. Both used to confirm "you
+        // caught the ship" — real information back when a grab could MISS. It
+        // can't any more, so the same cue would fire on every incidental touch
+        // of the screen while telling the player nothing. The hull tilting and
+        // moving under the finger is the confirmation.
       },
       onPanResponderMove: (evt) => {
         const s = g.current;
@@ -974,10 +1019,17 @@ export default function GameScreen({
 
     // --- Taking a hit -------------------------------------------------------
     // Every way the player can be hurt routes through here, so a shield blocks
-    // identically whether the source is a ram, a bullet or a drifting mine —
-    // and so `hitsTaken` can't drift out of step with the hearts actually lost.
+    // identically whether the source is a ram or a bullet — and so `hitsTaken`
+    // can't drift out of step with the hearts actually lost.
+    /**
+     * The shield boon is only protection while it still has budget left.
+     *
+     * The render applies the same two conditions (see `shieldUp` at the hoop),
+     * so what is drawn and what actually absorbs a shot cannot disagree.
+     */
+    const shieldUp = () => isShielded(g.current.boons) && g.current.shieldLeft > 0;
     /** Anything that makes the player untouchable right now. */
-    const isInvulnerable = () => isShielded(g.current.boons) || g.current.bulwarkTime > 0;
+    const isInvulnerable = () => shieldUp() || g.current.bulwarkTime > 0;
 
     const takeHit = (label?: string) => {
       const s = g.current;
@@ -985,12 +1037,34 @@ export default function GameScreen({
         // Absorbed outright. Loud feedback matters here: a silent save reads as
         // a missed collision, and the player stops trusting the shield.
         const bulwark = s.bulwarkTime > 0;
-        s.shake = Math.max(s.shake, 0.16);
+        s.shake = Math.max(s.shake, SHAKE_ABSORB);
         play('ding', 0.55);
         haptic(HapticWeight.Medium);
         const tint = bulwark ? BULWARK_COLOR : SHIELD_COLOR;
         burst(s.avatarX, s.avatarY, tint, 10);
         float(s.avatarX, s.avatarY - 40, bulwark ? 'BULWARK' : 'BLOCKED', tint);
+        // Bulwark runs its own budget (`bulwarkLeft`) and its own timer, so only
+        // the boon spends a charge here. Bulwark is checked FIRST, which means a
+        // shell held over a shield protects the shield's remaining hits too —
+        // the stronger defence should not be quietly billed to the weaker one.
+        if (!bulwark) {
+          s.shieldLeft -= 1;
+          if (s.shieldLeft <= 0) {
+            s.shieldLeft = 0;
+            // Deleted rather than zeroed: tickBoons announces anything it finds
+            // running out, and a shatter must not also report "SHIELD OVER" a
+            // frame later. This is the only message for it.
+            delete s.boons.shield;
+            // Deliberately NO shake: the absorb above already spent it on this
+            // same hit, and a shatter is not damage reaching the hull. The
+            // bigger burst, the label, the buzz and a heavy haptic carry it —
+            // see the camera-shake policy in constants.ts.
+            burst(s.avatarX, s.avatarY + AVATAR_HULL_CY, SHIELD_COLOR, 18);
+            float(s.avatarX, s.avatarY - 56, 'SHIELD BROKEN', SHIELD_COLOR);
+            play('buzz', 0.7);
+            haptic(HapticWeight.Heavy, Haptics.ImpactFeedbackStyle.Heavy);
+          }
+        }
         return;
       }
       s.hearts -= 1;
@@ -1002,7 +1076,7 @@ export default function GameScreen({
       // opposite of what the graze system is trying to encourage.
       breakChain(s);
       s.waveChainHeld = false;
-      s.shake = 0.28;
+      s.shake = SHAKE_MAX; // the hardest hit in the game, by definition
       s.hitFlash = 0.3;
       play('buzz', 0.9);
       hapticFailure();
@@ -1059,7 +1133,6 @@ export default function GameScreen({
       const oy = c.y + c.h / 2;
 
       if (c.boss) {
-        s.shake = Math.max(s.shake, 0.35);
         hitStop(HITSTOP_BOSS_KILL, true);
         scoreKill(
           c.boss === 'giant' ? SCORE_GIANT_BOSS : SCORE_MINI_BOSS,
@@ -1128,7 +1201,6 @@ export default function GameScreen({
         // Explosive elites take a parting shot at whoever killed them.
         if (c.elite === 'explosive') {
           explosiveBurst(c, s.wave, (spec) => spawnEnemyShot(spec));
-          s.shake = Math.max(s.shake, 0.2);
         }
       }
 
@@ -1162,7 +1234,6 @@ export default function GameScreen({
     // damage (half the direct hit).
     const explode = (hit: Card, hx: number, hy: number) => {
       const s = g.current;
-      s.shake = Math.max(s.shake, 0.14);
       burst(hx, hy, PALETTE.amber, 18);
       // Snapshot, for the same reason as the bomb: splash that kills a splitter
       // must not then splash the children it spawned.
@@ -1197,7 +1268,6 @@ export default function GameScreen({
         phase: Math.random() * Math.PI * 2,
         life: spec.life ?? ENEMY_BULLET_LIFE,
         shot: spec.shot,
-        mine: spec.mine,
         ownerId,
         ...enemyShotRender(spec.vx, spec.vy, size, spec.shot),
       });
@@ -1216,7 +1286,6 @@ export default function GameScreen({
         s.bombsUsed += 1;
       }
 
-      s.shake = Math.max(s.shake, BOMB_SHAKE);
       s.bombFlash = BOMB_FLASH_TIME;
       play('whoosh', 1);
       play('buzz', 0.6);
@@ -1258,6 +1327,10 @@ export default function GameScreen({
 
       if (!isInstant(kind)) {
         applyTimedBoon(s.boons, kind);
+        // A refreshed shield gets a fresh hit budget as well as a fresh timer.
+        // Without this, re-collecting one that was a hit from shattering would
+        // hand back six seconds of hoop and no actual protection.
+        if (kind === 'shield') s.shieldLeft = SHIELD_HITS;
         return;
       }
       switch (kind) {
@@ -1305,7 +1378,6 @@ export default function GameScreen({
       specialPulse.current.setValue(1);
 
       s.specialsUsed += 1;
-      s.shake = Math.max(s.shake, over ? 0.32 : 0.22);
       // A short freeze on activation, so the ultimate lands with weight rather
       // than simply appearing.
       hitStop(HITSTOP_BOSS_PHASE, true);
@@ -1325,12 +1397,12 @@ export default function GameScreen({
         // stronger rather than just longer.
         s.bulwarkTime = over ? BULWARK_TIME_OVER : BULWARK_TIME;
         s.bulwarkLeft = over ? BULWARK_REFLECT_MAX * 2 : BULWARK_REFLECT_MAX;
-        burst(s.avatarX, s.avatarY + AVATAR_SIZE / 2, BULWARK_COLOR, over ? 26 : 18);
+        burst(s.avatarX, hullY(s), BULWARK_COLOR, over ? 26 : 18);
       } else if (avatarSpecial === 'phantom') {
         // Specter: two ghosts of your own hull fade in and fire alongside you.
         s.phantomTime = PHANTOM_TIME;
-        burst(s.avatarX - PHANTOM_OFFSET, s.avatarY + AVATAR_SIZE / 2, PHANTOM_TINT, 12);
-        burst(s.avatarX + PHANTOM_OFFSET, s.avatarY + AVATAR_SIZE / 2, PHANTOM_TINT, 12);
+        burst(s.avatarX - PHANTOM_OFFSET, hullY(s), PHANTOM_TINT, 12);
+        burst(s.avatarX + PHANTOM_OFFSET, hullY(s), PHANTOM_TINT, 12);
       } else if (avatarSpecial === 'talons') {
         // Raptor: open up. The barrage runs itself from here — the update pass
         // walks a fan of claws out every TALON_BURST_EVERY until it times out.
@@ -1342,9 +1414,8 @@ export default function GameScreen({
         // fixed point — the ship flies on out of its own blast.
         s.novaR = 1;
         s.novaX = s.avatarX;
-        s.novaY = s.avatarY + AVATAR_SIZE / 2;
+        s.novaY = hullY(s);
         s.novaHits = [];
-        s.shake = Math.max(s.shake, 0.5); // it's a detonation — hit the camera hard
         burst(s.novaX, s.novaY, PALETTE.gold, 26);
         burst(s.novaX, s.novaY, NOVA_FLASH_COLOR, 16); // white-hot debris in the fireball
       } else if (avatarSpecial === 'spears') {
@@ -1565,10 +1636,16 @@ export default function GameScreen({
         }
       }
 
-      const avLeft = s.avatarX - AVATAR_SIZE / 2 + 6;
-      const avRight = s.avatarX + AVATAR_SIZE / 2 - 6;
-      const avTop = s.avatarY + 6;
-      const avBottom = s.avatarY + AVATAR_SIZE - 6;
+      // The hurtbox, centred on the DRAWN hull rather than hung below it. Same
+      // 44×44 area it has always been — see AVATAR_HIT_W — so the difficulty is
+      // unchanged; it simply now sits where the ship the player is looking at
+      // actually is. Shots that pass visibly under the hull no longer land, and
+      // the nose is no longer immune.
+      const cy = hullY(s);
+      const avLeft = s.avatarX - AVATAR_HIT_W / 2;
+      const avRight = s.avatarX + AVATAR_HIT_W / 2;
+      const avTop = cy - AVATAR_HIT_H / 2;
+      const avBottom = cy + AVATAR_HIT_H / 2;
       // The same box the hit test uses, handed to the graze check — so "near
       // miss" is measured against exactly the box that would have been a hit.
       const grazeBox = { left: avLeft, right: avRight, top: avTop, bottom: avBottom };
@@ -1577,7 +1654,7 @@ export default function GameScreen({
       ectx.dt = dt;
       ectx.elapsed = s.elapsed;
       ectx.playerX = s.avatarX;
-      ectx.playerY = s.avatarY + AVATAR_SIZE / 2;
+      ectx.playerY = hullY(s);
       ectx.wave = s.wave;
       ectx.worldSpeed = speed;
 
@@ -1599,14 +1676,17 @@ export default function GameScreen({
             if (c.holdY !== undefined && c.y < c.holdY) {
               c.y = Math.min(c.holdY, c.y + descendSpeed(c) * dt);
             } else {
-              // Bosses sway side to side across the top of the screen. The
-              // phase is anchored to the moment the sway starts, not to run
-              // time — otherwise sin() is already mid-swing when the boss lands
-              // and it snaps sideways the frame it stops descending.
-              if (c.swayT0 === undefined) c.swayT0 = s.elapsed;
-              c.cx =
-                SCREEN.W / 2 +
-                Math.sin((s.elapsed - c.swayT0) * BOSS_SWAY_FREQ) * SCREEN.W * BOSS_SWAY_AMP;
+              // Bosses sway side to side across the top of the screen. Width
+              // and speed both come from the current phase, so a wounded boss
+              // visibly moves harder — the escalation is legible before the
+              // player has read a single number off the health bar.
+              //
+              // Stepped by `dt`, never by run time: bossSway integrates the
+              // sway rather than sampling a clock, which is what keeps a phase
+              // change from relocating the boss. It also starts its sine at
+              // zero, so a boss eases out of its descent point at screen centre
+              // instead of landing mid-swing.
+              c.cx = bossSway(c, dt);
             }
           } else {
             // Wave 20+: a wounded enemy breaks formation and dives at the
@@ -1626,7 +1706,7 @@ export default function GameScreen({
             if (c.charging) {
               const curX = c.cx ?? laneX(c.lane);
               const dx = s.avatarX - curX;
-              const dy = s.avatarY + AVATAR_SIZE / 2 - (c.y + c.h / 2);
+              const dy = hullY(s) - (c.y + c.h / 2);
               const d = Math.hypot(dx, dy) || 1;
               c.cx = curX + (dx / d) * CHARGE_SPEED * dt;
               c.y += (dy / d) * CHARGE_SPEED * dt;
@@ -1661,7 +1741,7 @@ export default function GameScreen({
           if (c.kind === 'coin' && boonActive(s.boons, 'magnet')) {
             const cxNow = cardX(c);
             const dx = s.avatarX - cxNow;
-            const dy = s.avatarY + AVATAR_SIZE / 2 - (c.y + c.h / 2);
+            const dy = hullY(s) - (c.y + c.h / 2);
             const d = Math.hypot(dx, dy);
             if (d < MAGNET_RADIUS && d > 0.5) {
               c.cx = cxNow + (dx / d) * MAGNET_PULL * dt;
@@ -1748,7 +1828,13 @@ export default function GameScreen({
         s.enemyFireTimer =
           (Math.max(0.75, ENEMY_FIRE_EVERY / (1 + s.wave * 0.09)) * (0.7 + Math.random() * 0.6)) /
           VOLLEY_DAMPEN;
-        const shooters = s.cards.filter((c) => !c.dead && c.kind === 'rage' && c.y > 0);
+        // Bosses are excluded: they run their own weapon clock and their own
+        // patterns now (bossFire). Leaving them in meant that on a boss wave —
+        // where the boss is the ONLY card on the board — every global volley
+        // shot also came from the boss, burying the designed pattern under a
+        // stream of unpatterned aimed fire and roughly doubling the pressure.
+        // Same stacking problem VOLLEY_DAMPEN exists for, one layer up.
+        const shooters = s.cards.filter((c) => !c.dead && c.kind === 'rage' && c.y > 0 && !c.boss);
         if (shooters.length) {
           const kind: EnemyBullet['kind'] =
             s.wave >= HOMING_WAVE ? 'homing' : s.wave >= ZIGZAG_WAVE ? 'zigzag' : 'straight';
@@ -1768,13 +1854,11 @@ export default function GameScreen({
             const ox = cardX(sh);
             const oy = sh.y + sh.h;
             const dx = s.avatarX - ox;
-            const dy = s.avatarY + AVATAR_SIZE / 2 - oy;
+            const dy = hullY(s) - oy;
             const d = Math.hypot(dx, dy) || 1;
             const vx = (dx / d) * bSpeed;
             const vy = (dy / d) * bSpeed;
-            // A boss has no archetype, so it falls back to the boss shot
-            // rather than to the plain dot.
-            const shot = sh.boss ? BOSS_SHOT : enemyShotFor(sh.arch);
+            const shot = enemyShotFor(sh.arch);
             s.enemyBullets.push({
               id: s.nextId++,
               x: ox,
@@ -1792,40 +1876,48 @@ export default function GameScreen({
             });
           }
         }
-        // Bosses fire their own aimed fan on top of the volley: mini 2 shots,
-        // giant 3, slightly bigger than regular fire.
+      }
+
+      // --- Bosses fire on their OWN clock, not the global volley -------------
+      // Deliberately outside the `enemyFireTimer` block above. Riding the shared
+      // volley was what made a boss read as background pressure rather than as
+      // an opponent: its attacks landed on the same beat as every drone's, so
+      // there was no rhythm to learn and nothing to anticipate. bossFire owns
+      // `card.fireT` and each phase sets its own cadence.
+      if (!frozen) {
+        // A boss is not an elite, so its shots are attributed to nobody. Reset
+        // explicitly rather than relying on the archetype loop above having
+        // cleared it — this loop must stay correct if that one is reordered.
+        ectxOwner = undefined;
         for (const bc of s.cards) {
           if (bc.dead || !bc.boss || bc.y <= 0) continue;
-          const fan = bc.boss === 'giant' ? 3 : 2;
-          const ox = cardX(bc);
-          const oy = bc.y + bc.h;
-          const baseA = Math.atan2(s.avatarY + AVATAR_SIZE / 2 - oy, s.avatarX - ox);
-          const color = WAVE_COLORS[(s.wave - 1) % WAVE_COLORS.length];
-          const bossSize = ENEMY_BULLET_SIZE * 1.3;
-          for (let k = 0; k < fan; k++) {
-            // A boss fan is the most telegraphed attack in the game, so it is
-            // the LAST thing that should be dropped — but the ceiling is a hard
-            // bound, and if the board is that full the player has bigger
-            // problems than a missing third shot.
-            if (s.enemyBullets.length >= MAX_ENEMY_BULLETS) break;
-            const a = baseA + (k - (fan - 1) / 2) * 0.28;
-            const vx = Math.cos(a) * ENEMY_BULLET_SPEED;
-            const vy = Math.sin(a) * ENEMY_BULLET_SPEED;
-            s.enemyBullets.push({
-              id: s.nextId++,
-              x: ox,
-              y: oy,
-              vx,
-              vy,
-              kind: 'straight',
-              color,
-              size: bossSize,
-              phase: Math.random() * Math.PI * 2,
-              life: ENEMY_BULLET_LIFE,
-              shot: BOSS_SHOT, // bosses are not archetypes; heaviest shot in the set
-              ...enemyShotRender(vx, vy, bossSize, BOSS_SHOT),
-            });
+
+          // Crossing into a new phase is the beat of the whole fight, so it is
+          // announced once, on the frame it happens. Without this the boss just
+          // quietly starts doing something else and the player never learns
+          // that hurting it is what changed its behaviour.
+          const phase = bossPhaseIndex(bc);
+          if (bc.bossPhaseSeen === undefined) {
+            bc.bossPhaseSeen = phase;
+          } else if (phase > bc.bossPhaseSeen) {
+            bc.bossPhaseSeen = phase;
+            hitStop(HITSTOP_BOSS_PHASE, true);
+            burst(cardX(bc), bc.y + bc.h / 2, PALETTE.threat, 16);
+            float(
+              cardX(bc),
+              bc.y - 12,
+              `PHASE ${phase + 1}`,
+              PALETTE.threat,
+              1
+            );
+            play('buzz', 0.5);
+            haptic(HapticWeight.Heavy, Haptics.ImpactFeedbackStyle.Heavy);
+            // A wind-up already in flight is deliberately NOT cancelled here —
+            // bossFire honours it and fires the salvo the ring promised. See
+            // the note on that branch: the tell must never be a lie.
           }
+
+          bossFire(bc, ectx);
         }
       }
 
@@ -1846,7 +1938,7 @@ export default function GameScreen({
         b.life -= dt;
         if (b.kind === 'homing') {
           const dx = s.avatarX - b.x;
-          const dy = s.avatarY + AVATAR_SIZE / 2 - b.y;
+          const dy = hullY(s) - b.y;
           if (Math.hypot(dx, dy) > ENEMY_HOMING_DISLOCK) {
             // Still locked: slowly turn toward the player.
             const desired = Math.atan2(dy, dx);
@@ -1887,7 +1979,7 @@ export default function GameScreen({
           // --- Bulwark: the shell eats the shot and throws it back ----------
           // Checked before takeHit so the reflection happens on the absorb, and
           // capped per activation so a spinner can't hand over a hundred shots.
-          if (s.bulwarkTime > 0 && s.bulwarkLeft > 0 && !b.mine) {
+          if (s.bulwarkTime > 0 && s.bulwarkLeft > 0) {
             s.bulwarkLeft -= 1;
             s.bullets.push({
               id: s.nextId++,
@@ -1903,7 +1995,7 @@ export default function GameScreen({
           }
           burst(b.x, b.y, b.color, 8);
           const blocked = isInvulnerable();
-          takeHit(b.mine ? 'MINE' : undefined);
+          takeHit();
           // A Vampiric elite feeds off a landed shot. A blocked hit feeds it
           // nothing — the shield denies the heal as well as the damage, which
           // is what makes it worth having against them.
@@ -1923,11 +2015,11 @@ export default function GameScreen({
         // the hull. Pays score and energy, and refreshes the chain window — so
         // the correct way to play is to fly TOWARD the dense patterns rather
         // than away from them, which is what makes the bullet-hell archetypes
-        // (spinner, scattergun, mine layer) desirable instead of just annoying.
+        // (spinner, scattergun) desirable instead of just annoying.
         //
         // Once per bullet: `grazed` latches, or a shot sitting alongside the
         // hull would pay every single frame.
-        if (!b.grazed && !b.mine && isGrazing(b, grazeBox)) {
+        if (!b.grazed && isGrazing(b, grazeBox)) {
           b.grazed = true;
           b.grazeFlash = 0.12;
           s.grazes += 1;
@@ -2391,7 +2483,11 @@ export default function GameScreen({
   const overcharged = s.specialCharge >= ENERGY_OVERCHARGE;
 
   return (
-    <View style={[styles.wrap, { backgroundColor: SPACE_BLACK }]} {...pan.panHandlers}>
+    <View
+      testID="playfield"
+      style={[styles.wrap, { backgroundColor: SPACE_BLACK }]}
+      {...pan.panHandlers}
+    >
       {/* One fixed environment for the whole run — the player's chosen
           background. Scrolled on the native side via bgAnims (no per-frame
           React render). */}
@@ -2564,37 +2660,6 @@ export default function GameScreen({
           )
         )}
         {s.enemyBullets.map((b, i) => {
-          // A laid mine is a lingering area-denial hazard, not a shot, so it
-          // gets its own look: a pulsing ringed disc that reads as "do not fly
-          // here" rather than as something that might miss you.
-          if (b.mine) {
-            const pulse = 1 + 0.16 * Math.sin(s.elapsed * MINE_PULSE_FREQ + b.phase);
-            const d = b.size * 1.7;
-            return (
-              <View
-                key={i}
-                pointerEvents="none"
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  width: d,
-                  height: d,
-                  borderRadius: d / 2,
-                  borderWidth: 3,
-                  borderColor: b.color,
-                  // Was a yellow fill, which is now chain/reward gold — on a
-                  // thing that kills you. Threat family.
-                  backgroundColor: 'rgba(255,46,91,0.18)',
-                  transform: [
-                    { translateX: b.x - d / 2 },
-                    { translateY: b.y - d / 2 },
-                    { scale: pulse },
-                  ],
-                }}
-              />
-            );
-          }
           const artIdx = b.shot ?? -1;
           if (artIdx < 0) {
             return (
@@ -2695,16 +2760,27 @@ export default function GameScreen({
         {/* Shield bubble: a bright hoop around the hull while the boon holds, so
             "nothing can touch me" is legible at a glance. It thins out over the
             last second as a warning that it's about to drop. */}
-        {boonActive(s.boons, 'shield') && (
+        {boonActive(s.boons, 'shield') && s.shieldLeft > 0 && (
           <View
             pointerEvents="none"
             style={[
               styles.shieldRing,
               {
-                opacity: Math.min(1, (s.boons.shield ?? 0) / 1) * 0.85,
+                // Two independent warnings, because the shield now has two ways
+                // to end: it thins over its last second (time) and dims as its
+                // charges are spent (hits). A player who can see the hoop
+                // weakening can decide to start dodging again before it pops.
+                opacity:
+                  Math.min(1, (s.boons.shield ?? 0) / 1) *
+                  0.85 *
+                  (0.45 + 0.55 * (s.shieldLeft / SHIELD_HITS)),
                 transform: [
                   { translateX: s.avatarX - SHIELD_RING / 2 },
-                  { translateY: s.avatarY + AVATAR_SIZE / 2 - SHIELD_RING / 2 },
+                  // Centred on the DRAWN HULL, not the hitbox. Those are ~15px
+                  // apart (see AVATAR_HULL_CY), and using the hitbox centre is
+                  // what put the bubble behind the ship with its nose sticking
+                  // out the front.
+                  { translateY: s.avatarY + AVATAR_HULL_CY - SHIELD_RING / 2 },
                 ],
               },
             ]}
@@ -2714,7 +2790,9 @@ export default function GameScreen({
         {s.bulwarkTime > 0 && (
           <BulwarkShell
             x={s.avatarX}
-            y={s.avatarY + AVATAR_SIZE / 2}
+            // Same hull centre as the shield hoop — the shell had the identical
+            // offset, for the identical reason.
+            y={s.avatarY + AVATAR_HULL_CY}
             time={s.bulwarkTime}
             over={s.bulwarkTime > BULWARK_TIME}
           />
@@ -2725,11 +2803,14 @@ export default function GameScreen({
           style={[
             styles.rocket,
             {
+              // These three are AVATAR_HULL_CY's inputs — it is derived from
+              // them so the shield and Bulwark hoops stay centred on the hull if
+              // this is ever retuned. Changing them here changes the hoops too.
               transform: [
-                { translateX: s.avatarX - 36 },
-                { translateY: s.avatarY - 22 },
+                { translateX: s.avatarX + AVATAR_ART_DX },
+                { translateY: s.avatarY + AVATAR_ART_DY },
                 { rotate: `${tilt}deg` },
-                { scale: 1.45 },
+                { scale: AVATAR_ART_SCALE },
               ],
             },
           ]}

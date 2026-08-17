@@ -11,7 +11,10 @@ import {
   BOON_EMOJI,
   ELITE_AURA_SCALE,
   ELITE_AURA_ALPHA,
-  WINDUP_RING,
+  WINDUP_RING_SCALE,
+  WINDUP_RING_GROW,
+  WINDUP_RING_FADE,
+  WINDUP_RING_WIDTH,
   ENEMY_SHIP_VIS,
   ENEMY_SHIPS,
   GUN_PICKUP_IMG,
@@ -36,6 +39,42 @@ const GLOW: Record<string, string> = {
   // hostile crimson, it is only that health now has a red of its own.
   heart: PALETTE.vital,
   gift: PALETTE.gold,
+};
+
+/**
+ * The charge tell for anything that winds a shot up — the Sniper archetype and
+ * a boss in a telegraphed phase.
+ *
+ * Sized and centred against the sprite it belongs to rather than against a
+ * fixed pixel box, because the two callers differ by more than 3× in width. A
+ * plain function rather than a component: `ObstacleView` re-renders every frame
+ * by design (see the note on the memo below), and `windup` changes every one of
+ * those frames, so a `React.memo` boundary here would only add a comparison
+ * that can never hit.
+ *
+ * `box` is the parent's square footprint; the ring positions itself inside it,
+ * which is what lets the same call work in the flex-centred emoji wrapper and
+ * in the boss wrapper that does no centring at all.
+ */
+const windupRing = (box: number, windup: number) => {
+  const d = box * WINDUP_RING_SCALE;
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: 'absolute',
+        left: (box - d) / 2,
+        top: (box - d) / 2,
+        width: d,
+        height: d,
+        borderRadius: d / 2,
+        borderWidth: WINDUP_RING_WIDTH,
+        borderColor: PALETTE.threat, // winding up is a threat, not a reward
+        opacity: Math.max(0.35, 0.95 - windup * WINDUP_RING_FADE),
+        transform: [{ scale: 1 + windup * WINDUP_RING_GROW }],
+      }}
+    />
+  );
 };
 
 // Instantly readable obstacles — no text to parse at game speed.
@@ -129,6 +168,12 @@ function ObstacleView({ ob, avatarShot }: { ob: Card; avatarShot?: ShotArt }) {
         pointerEvents="none"
       >
         {hpBar}
+        {/* The boss telegraph. This branch returns early, so it needs its own
+            copy — the ring further down belongs to the non-boss tree and never
+            rendered here. A boss set `windup` faithfully and nothing drew it,
+            which left the giant's final phase throwing an unannounced aimed
+            salvo while the code's own fairness argument claimed otherwise. */}
+        {(ob.windup ?? 0) > 0 && windupRing(vis, ob.windup!)}
         <Image
           source={ob.boss === 'giant' ? BOSS_GIANT_IMG : BOSS_MINI_IMG}
           style={{ width: vis, height: vis }}
@@ -182,7 +227,7 @@ function ObstacleView({ ob, avatarShot }: { ob: Card; avatarShot?: ShotArt }) {
           )}
           {/* A sniper's charge, drawn as a tightening bright ring. The fast shot
               that follows is only fair because this telegraphs it. */}
-          {(ob.windup ?? 0) > 0 && <View style={styles.windupRing} />}
+          {(ob.windup ?? 0) > 0 && windupRing(OB_VIS, ob.windup!)}
           {/* A teleporter's arrival flash. */}
           {(ob.blinkFlash ?? 0) > 0 && (
             <View style={[styles.blinkFlash, { opacity: (ob.blinkFlash ?? 0) / 0.22 }]} />
@@ -267,15 +312,6 @@ const styles = StyleSheet.create({
   eliteAura: {
     position: 'absolute',
     opacity: ELITE_AURA_ALPHA,
-  },
-  windupRing: {
-    position: 'absolute',
-    width: WINDUP_RING,
-    height: WINDUP_RING,
-    borderRadius: WINDUP_RING / 2,
-    borderWidth: 2.5,
-    borderColor: PALETTE.threat, // a sniper winding up is a threat, not a reward
-    opacity: 0.9,
   },
   blinkFlash: {
     position: 'absolute',

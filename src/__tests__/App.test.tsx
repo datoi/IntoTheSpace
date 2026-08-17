@@ -268,7 +268,7 @@ describe('App — backgrounds economy', () => {
         likes: 900,
         unlocked: ['ironclad'],
         selectedAvatar: 'ironclad',
-        unlockedBackgrounds: ['violet', 'void', 'azure', 'quartz'],
+        unlockedBackgrounds: ['violet', 'azure', 'ember'],
         selectedBackground: 'violet',
       })
     );
@@ -276,7 +276,7 @@ describe('App — backgrounds economy', () => {
     await fireEvent.press(screen.getByText('SHOP'));
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
     // Cycle through several, then back to the first — each swaps the sky.
-    for (const name of ['Deep Void', 'Azure Drift', 'Rose Quartz', 'Violet Veil', 'Deep Void']) {
+    for (const name of ['Azure Drift', 'Ember Reach', 'Violet Veil', 'Azure Drift']) {
       await fireEvent.press(screen.getByText(name));
       await advance(20);
       expect(screen.getByText('BACKGROUNDS')).toBeTruthy();
@@ -290,25 +290,25 @@ describe('App — backgrounds economy', () => {
     await bootApp();
     await fireEvent.press(screen.getByText('SHOP'));
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
-    await fireEvent.press(screen.getByText('Deep Void')); // costs 90
-    expect(screen.getByText('110 coins')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Azure Drift')); // costs 120
+    expect(screen.getByText('80 coins')).toBeTruthy();
     expect(screen.getByText('EQUIPPED')).toBeTruthy();
     await advance(10);
     const stored = JSON.parse((await AsyncStorage.getItem(SAVE_KEY))!);
-    expect(stored.likes).toBe(110);
-    expect(stored.unlockedBackgrounds).toContain('void');
-    expect(stored.selectedBackground).toBe('void');
+    expect(stored.likes).toBe(80);
+    expect(stored.unlockedBackgrounds).toContain('azure');
+    expect(stored.selectedBackground).toBe('azure');
   });
 
   it('cannot buy a background it cannot afford', async () => {
     await bootApp();
     await fireEvent.press(screen.getByText('SHOP'));
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
-    await fireEvent.press(screen.getByText('Crimson Cloud')); // 450 > 200
+    await fireEvent.press(screen.getByText('Ember Reach')); // 240 > 200
     expect(screen.getByText('200 coins')).toBeTruthy();
     await advance(10);
     const stored = JSON.parse((await AsyncStorage.getItem(SAVE_KEY))!);
-    expect(stored.unlockedBackgrounds ?? ['violet']).not.toContain('crimson');
+    expect(stored.unlockedBackgrounds ?? ['violet']).not.toContain('ember');
   });
 
   it('equipping an owned background persists the selection without cost', async () => {
@@ -319,17 +319,17 @@ describe('App — backgrounds economy', () => {
         likes: 200,
         unlocked: ['ironclad'],
         selectedAvatar: 'ironclad',
-        unlockedBackgrounds: ['violet', 'void'],
+        unlockedBackgrounds: ['violet', 'azure'],
         selectedBackground: 'violet',
       })
     );
     await bootApp();
     await fireEvent.press(screen.getByText('SHOP'));
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
-    await fireEvent.press(screen.getByText('Deep Void'));
+    await fireEvent.press(screen.getByText('Azure Drift'));
     await advance(10);
     const stored = JSON.parse((await AsyncStorage.getItem(SAVE_KEY))!);
-    expect(stored.selectedBackground).toBe('void');
+    expect(stored.selectedBackground).toBe('azure');
     expect(stored.likes).toBe(200);
   });
 });

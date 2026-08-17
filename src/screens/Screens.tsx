@@ -23,6 +23,17 @@ import { RollingNumber, useReduceMotion } from '../components/Motion';
 const AVATARS_BY_PRICE = [...AVATARS].sort((a, b) => a.price - b.price);
 const BACKGROUNDS_BY_PRICE = [...BACKGROUNDS].sort((a, b) => a.price - b.price);
 
+// --- The menu's hull pedestal -------------------------------------------------
+// The glow disc behind the ship, and the box it lives in. The slot is larger
+// than the disc, and that difference is the only thing standing between the
+// glow and the ship's name below it — so they belong together, named, rather
+// than as two loose numbers in the stylesheet.
+//
+// The disc was 150 against a 104-wide hull, which is a wide halo but also wider
+// than the art it was lighting; 128 still reads as a lit pedestal.
+const HULL_GLOW = 128;
+const HULL_SLOT = 148;
+
 // ---------- Menu ----------
 interface MenuProps {
   save: SaveData;
@@ -87,21 +98,48 @@ export function MenuScreen({
       </View>
 
       {/* The hull on a glow pedestal, with its special named beneath — the menu
-          now sells the ship the player is about to fly. */}
-      <View style={styles.pedestal}>
-        <View style={styles.pedestalGlow} />
-        <Animated.View
-          style={{
-            transform: [{ translateY: bob.interpolate({ inputRange: [0, 1], outputRange: [4, -4] }) }],
-          }}
-        >
-          <Image source={avatar.image} style={styles.menuAvatarImg} resizeMode="contain" />
-        </Animated.View>
+          now sells the ship the player is about to fly.
+
+          Pressing it opens the SHOP, which lands on its ships tab: the hull is
+          what a player is looking at when they decide they want a different one,
+          so it should be the thing they can press. The rail's SHOP button stays
+          exactly as it was — this is a shortcut to it, not a replacement.
+
+          Deliberately no `hitSlop`: the pedestal is already a ~148px target and
+          LIFT OFF sits immediately beneath it, so widening this one could only
+          steal taps from the primary CTA. */}
+      <Pressable
+        onPress={onShop}
+        testID="menu-hull"
+        accessibilityRole="button"
+        accessibilityLabel={`${avatar.name} — open the ship shop`}
+        style={({ pressed }) => [styles.pedestal, pressed && styles.pressed]}
+      >
+        {/* The hull and its glow share a fixed-size slot, so the disc is bounded
+            by a box of its own instead of being offset from the bottom of the
+            whole pedestal. It used to be the latter, which meant its position
+            depended on the height of the two TEXT LINES below it — and it sat
+            low enough to run through the top of the ship's name. Anything that
+            changed those font metrics moved the glow. */}
+        <View style={styles.hullSlot}>
+          <View style={styles.pedestalGlow} />
+          {/* The glow deliberately stays OUTSIDE the bob: the hull reads as
+              floating because it moves against something that doesn't. */}
+          <Animated.View
+            style={{
+              transform: [
+                { translateY: bob.interpolate({ inputRange: [0, 1], outputRange: [4, -4] }) },
+              ],
+            }}
+          >
+            <Image source={avatar.image} style={styles.menuAvatarImg} resizeMode="contain" />
+          </Animated.View>
+        </View>
         <Text style={styles.pedestalShip}>{avatar.name}</Text>
         <Text style={[styles.pedestalSpecial, { color: avatar.shot.tint }]}>
           {SPECIALS[avatar.special].name}
         </Text>
-      </View>
+      </Pressable>
 
       {/* ONE primary CTA. Everything else drops to the icon rail below, which
           removes five stacked elements and three competing button weights. */}
@@ -498,19 +536,29 @@ const styles = StyleSheet.create({
   // The hull on a lit pedestal, with its special named — the menu sells the
   // ship rather than listing buttons above it.
   pedestal: { alignItems: 'center', marginBottom: 18 },
+  /**
+   * The hull's own box. Taller than the glow by design — that margin is the
+   * clearance which keeps the disc off the ship's name, and it holds whatever
+   * the name's font metrics turn out to be.
+   */
+  hullSlot: {
+    width: HULL_SLOT,
+    height: HULL_SLOT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   pedestalGlow: {
     position: 'absolute',
-    bottom: 26,
-    width: 150,
-    height: 150,
-    borderRadius: 75,
+    width: HULL_GLOW,
+    height: HULL_GLOW,
+    borderRadius: HULL_GLOW / 2,
     backgroundColor: PALETTE.plasmaGlow,
     opacity: 0.5,
   },
   pedestalShip: {
     ...TYPE.title,
     color: PALETTE.ink,
-    marginTop: 6,
+    marginTop: 8,
   },
   pedestalSpecial: {
     ...TYPE.micro,
@@ -543,7 +591,8 @@ const styles = StyleSheet.create({
     lineHeight: 60,
   },
   titleAccent: { color: PALETTE.plasma },
-  menuAvatarImg: { width: 104, height: 116, marginTop: 20 },
+  // Centred by hullSlot now, so it carries no margin of its own.
+  menuAvatarImg: { width: 104, height: 116 },
   menuBestDim: {
     color: PALETTE.inkDim,
     fontSize: 12,
@@ -728,9 +777,10 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   bigScore: {
+    // No `fontSize` override — see TYPE.displayXl. Overriding the size here
+    // while inheriting that token's lineHeight is what cropped the score.
     ...TYPE.displayXl,
     color: PALETTE.ink,
-    fontSize: 80,
   },
   // No bottom gap on either: the stat row below supplies the spacing.
   newBest: {

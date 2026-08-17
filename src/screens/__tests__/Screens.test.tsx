@@ -7,6 +7,9 @@ import { AVATARS } from '../../game/constants';
 
 const freshSave: SaveData = { ...DEFAULT_SAVE };
 
+const flatten = (style: unknown): Record<string, number> =>
+  Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
+
 describe('MenuScreen', () => {
   it('renders the title and coins but hides BEST before the first run', async () => {
     await render(<MenuScreen save={{ ...freshSave, likes: 40 }} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
@@ -28,6 +31,38 @@ describe('MenuScreen', () => {
     expect(screen.getByText('25')).toBeTruthy();
   });
 
+  it('keeps the hull glow inside its own box, clear of the ship name', async () => {
+    // REGRESSION. The glow disc used to be a direct child of the pedestal,
+    // offset `bottom: 26` from it — so its position was a function of the height
+    // of the two TEXT LINES beneath, and at 150px it ran through the top of the
+    // ship's name. It now lives in a fixed slot that is strictly larger than it,
+    // which is what guarantees clearance no matter what the name's font does.
+    await render(
+      <MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />
+    );
+
+    // The disc: a circle filled with the plasma glow.
+    let glow: Record<string, number> | undefined;
+    let slot: Record<string, number> | undefined;
+    const walk = (node: any, parent: any) => {
+      if (!node || typeof node !== 'object') return;
+      const s = flatten(node.props?.style);
+      if (s.borderRadius && s.width && s.borderRadius === s.width / 2 && s.opacity === 0.5) {
+        glow = s;
+        slot = flatten(parent?.props?.style);
+      }
+      (node.children ?? []).forEach((k: any) => walk(k, node));
+    };
+    walk(screen.toJSON(), null);
+
+    expect(glow).toBeDefined();
+    // Bounded by a parent with a real box, not floating in the pedestal.
+    expect(slot?.width).toBeGreaterThan(glow!.width);
+    expect(slot?.height).toBeGreaterThan(glow!.height);
+    // And smaller than it was, which is what was actually asked for.
+    expect(glow!.width).toBeLessThan(150);
+  });
+
   it('starts the game and opens the shop', async () => {
     const onStart = jest.fn();
     const onShop = jest.fn();
@@ -36,6 +71,21 @@ describe('MenuScreen', () => {
     expect(onStart).toHaveBeenCalledTimes(1);
     await fireEvent.press(screen.getByText('SHOP'));
     expect(onShop).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the shop when the hull on the pedestal is tapped', async () => {
+    // The hull is what a player is looking at when they decide they want a
+    // different one, so pressing it is a shortcut into the ships tab. Distinct
+    // from the rail's SHOP button, which must keep working on its own.
+    const onShop = jest.fn();
+    const onStart = jest.fn();
+    await render(
+      <MenuScreen save={freshSave} onStart={onStart} onShop={onShop} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />
+    );
+    await fireEvent.press(screen.getByTestId('menu-hull'));
+    expect(onShop).toHaveBeenCalledTimes(1);
+    // Tapping the ship must never be mistaken for launching a run.
+    expect(onStart).not.toHaveBeenCalled();
   });
 
   it('falls back to the first avatar when the selected id is unknown', async () => {
@@ -63,6 +113,27 @@ describe('GameOverScreen', () => {
     expect(screen.getByText('SCORE')).toBeTruthy();
     expect(screen.getByText('9,800')).toBeTruthy();
     expect(screen.getByText(/BEST 15,000/)).toBeTruthy();
+  });
+
+  it('gives the headline score a line box tall enough to draw it in', async () => {
+    // REGRESSION. React Native clips a glyph to its line box, so a lineHeight
+    // below fontSize shears the tops off the digits. `bigScore` overrode
+    // fontSize to 80 while inheriting TYPE.displayXl's lineHeight, which was
+    // computed for 72 and already tightened to 0.94 — the ratio landed at 0.85
+    // and the biggest number in the game rendered with its caps cut off.
+    await render(
+      <GameOverScreen
+        result={result}
+        best={2000}
+        bestScore={15000}
+        isNewBest={false}
+        onRestart={jest.fn()}
+        onMenu={jest.fn()}
+      />
+    );
+    const style = flatten(screen.getByText('9,800').props.style);
+    expect(style.fontSize).toBeGreaterThan(0);
+    expect(style.lineHeight).toBeGreaterThanOrEqual(style.fontSize);
   });
 
   it('breaks the score down so the player learns where it came from', async () => {
@@ -197,9 +268,9 @@ describe('ShopScreen', () => {
   it('switches to the backgrounds tab and buys an affordable one', async () => {
     const { onBuyBackground, onSelectBackground } = await renderShop(richSave); // 200 coins
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
-    expect(screen.getByText('Deep Void')).toBeTruthy(); // 90 coins, affordable
-    await fireEvent.press(screen.getByText('Deep Void'));
-    expect(onBuyBackground).toHaveBeenCalledWith('void');
+    expect(screen.getByText('Azure Drift')).toBeTruthy(); // 120 coins, affordable
+    await fireEvent.press(screen.getByText('Azure Drift'));
+    expect(onBuyBackground).toHaveBeenCalledWith('azure');
     expect(onSelectBackground).not.toHaveBeenCalled();
   });
 
@@ -214,7 +285,7 @@ describe('ShopScreen', () => {
   it('locks a background the wallet cannot afford', async () => {
     const { onBuyBackground } = await renderShop(richSave); // 200 coins
     await fireEvent.press(screen.getByText('BACKGROUNDS'));
-    await fireEvent.press(screen.getByText('Crimson Cloud')); // 450 coins
+    await fireEvent.press(screen.getByText('Ember Reach')); // 240 coins
     expect(onBuyBackground).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react-native';
 import GameScreen from '../GameScreen';
-import { leftOf } from '../../test-utils/style';
+import { leftOf, topOf } from '../../test-utils/style';
 import { freshRunState } from '../../game/runstate';
 import { BASE_SHIP_STATS } from '../../game/upgrades';
 import { GameState, Card, EnemyBullet } from '../../game/types';
@@ -10,6 +10,10 @@ import {
   laneX,
   AVATAR_Y,
   AVATAR_SIZE,
+  AVATAR_HULL_CY,
+  AVATAR_HULL_D,
+  SHIELD_RING,
+  SHIELD_HITS,
   HEARTS_START,
     ENEMY_SHIPS,
   BOSS_MINI_IMG,
@@ -350,6 +354,143 @@ describe('GameScreen — collisions & pickups', () => {
   });
 });
 
+describe('GameScreen — the shield boon', () => {
+  /** A shot parked exactly on the hull, so it lands on the first frame. */
+  const hullShot = (id: number): EnemyBullet => ({
+    id,
+    x: AVATAR_X,
+    y: AVATAR_Y + AVATAR_SIZE / 2,
+    vx: 0,
+    vy: 50,
+    kind: 'straight',
+    color: '#FF0000',
+    size: 11,
+    phase: 0,
+    life: 6,
+    shot: 0,
+  });
+
+  /** The hoop's drawn style, or undefined when it isn't on screen. */
+  const shieldRing = (): Record<string, any> | undefined => {
+    let found: Record<string, any> | undefined;
+    const walk = (node: any) => {
+      if (!node || typeof node !== 'object') return;
+      const st = Object.assign({}, ...[node.props?.style].flat(Infinity).filter(Boolean));
+      if (st.width === SHIELD_RING && st.borderRadius === SHIELD_RING / 2) found = st;
+      (node.children ?? []).forEach(walk);
+    };
+    walk(screen.toJSON());
+    return found;
+  };
+
+  const shielded = (over: Partial<GameState> = {}) =>
+    quietState({ boons: { shield: 99 }, shieldLeft: SHIELD_HITS, ...over });
+
+  it('centres the hoop on the drawn hull, not on the hitbox', async () => {
+    await renderGame(shielded());
+    await advance(50);
+    const st = shieldRing();
+    expect(st).toBeDefined();
+    const centreY = topOf(st) + SHIELD_RING / 2;
+    // Where the ship is actually DRAWN.
+    expect(centreY).toBeCloseTo(AVATAR_Y + AVATAR_HULL_CY, 5);
+    // And explicitly NOT the hitbox centre. That was the bug: ~15px low, so the
+    // nose stuck out the front and the bubble trailed behind the ship.
+    expect(centreY).not.toBeCloseTo(AVATAR_Y + AVATAR_SIZE / 2, 1);
+  });
+
+  it('is wide enough to contain the hull it is drawn around', async () => {
+    await renderGame(shielded());
+    await advance(50);
+    expect(shieldRing()!.width).toBeGreaterThan(AVATAR_HULL_D);
+  });
+
+  it('absorbs exactly SHIELD_HITS hits and then shatters', async () => {
+    const shots = Array.from({ length: SHIELD_HITS }, (_, i) => hullShot(900 + i));
+    await renderGame(shielded({ enemyBullets: shots }));
+    await advance(100);
+    // The budget covered every one of them, so the hull is untouched…
+    expect(heartsFromBar()).toBe(HEARTS_START);
+    // …and spending the last charge ends the shield then and there, rather than
+    // it running to the end of its six seconds.
+    expect(screen.getByText('SHIELD BROKEN')).toBeTruthy();
+    expect(shieldRing()).toBeUndefined();
+  });
+
+  it('stops protecting once it has shattered', async () => {
+    const shots = Array.from({ length: SHIELD_HITS + 1 }, (_, i) => hullShot(900 + i));
+    await renderGame(shielded({ enemyBullets: shots }));
+    await advance(100);
+    // One shot more than it could eat, so exactly one gets through. The old
+    // shield absorbed an unbounded number for its whole duration.
+    expect(heartsFromBar()).toBe(HEARTS_START - 1);
+  });
+
+  it('holds while it still has charges left', async () => {
+    const shots = Array.from({ length: SHIELD_HITS - 1 }, (_, i) => hullShot(900 + i));
+    await renderGame(shielded({ enemyBullets: shots }));
+    await advance(100);
+    expect(heartsFromBar()).toBe(HEARTS_START);
+    expect(screen.queryByText('SHIELD BROKEN')).toBeNull();
+    expect(shieldRing()).toBeDefined();
+  });
+
+  it('treats a pre-budget snapshot as a full shield rather than an inert hoop', async () => {
+    // A run saved before SHIELD_HITS existed has a live boon and no shieldLeft.
+    // Spreading that would give 0 charges — a hoop that draws but never blocks.
+    const legacy = quietState({ boons: { shield: 99 }, enemyBullets: [hullShot(900)] });
+    delete (legacy as Partial<GameState>).shieldLeft;
+    await renderGame(legacy);
+    await advance(100);
+    expect(heartsFromBar()).toBe(HEARTS_START);
+  });
+});
+
+describe('GameScreen — the hurtbox sits on the ship', () => {
+  /** A stationary shot, so these stay pure tests of POSITION. */
+  const shotAt = (y: number): EnemyBullet => ({
+    id: 950,
+    x: AVATAR_X,
+    y,
+    vx: 0,
+    vy: 0,
+    kind: 'straight',
+    color: '#FF0000',
+    size: 11,
+    phase: 0,
+    life: 6,
+    shot: 0,
+  });
+
+  it('ignores a shot that passes visibly under the hull', async () => {
+    // The old box ran to AVATAR_Y + 50, so this landed — despite being in empty
+    // space below the drawn ship, which is what made it feel unfair.
+    await renderGame(quietState({ enemyBullets: [shotAt(AVATAR_Y + 45)] }));
+    await advance(200);
+    expect(heartsFromBar()).toBe(HEARTS_START);
+  });
+
+  it('registers a shot on the nose, which used to be immune', async () => {
+    // The old box STARTED at AVATAR_Y + 6, so the whole nose was unhittable
+    // even though it is the part of the ship furthest into danger.
+    await renderGame(quietState({ enemyBullets: [shotAt(AVATAR_Y - 5)] }));
+    await advance(200);
+    expect(heartsFromBar()).toBe(HEARTS_START - 1);
+  });
+
+  it('aims enemy fire at the hull, so aimed shots still connect', async () => {
+    // The hurtbox and every aim point had to move together. If only the box
+    // moved, aimed fire would target ~15px below it and systematically miss.
+    const resume = quietState({
+      cards: [card({ y: 200, hp: 50, maxHp: 50 })],
+      enemyFireTimer: 0.01,
+    });
+    await renderGame(resume);
+    await advance(5000);
+    expect(heartsFromBar()).toBeLessThan(HEARTS_START);
+  });
+});
+
 describe('GameScreen — escalating enemy behavior', () => {
   it('wave 15+: a homing rocket tracks and hits a static player', async () => {
     const resume = quietState({
@@ -368,7 +509,11 @@ describe('GameScreen — escalating enemy behavior', () => {
       cards: [card({ y: 150, holdY: 150, hp: 1, maxHp: 14 })], // wounded → charges
     });
     await renderGame(resume);
-    await advance(7200); // charge speed 120px/s over ~780px
+    // Charge speed 120px/s over ~765px. Sampled shortly after impact rather
+    // than long after it: the float lives 0.8s, and this used to sit 30ms past
+    // that window — so recentring the hurtbox (which brings contact ~0.13s
+    // forward) expired the label while the heart loss it reports was correct.
+    await advance(6800);
     expect(heartsFromBar()).toBe(HEARTS_START - 1);
     expect(screen.getByText('-1 HULL')).toBeTruthy();
   });
@@ -458,26 +603,69 @@ describe('GameScreen — escalating enemy behavior', () => {
     }
   });
 
-  it('a boss adds its own fan of shots on top of the regular volley', async () => {
-    const boss = card({
+  // The hidden prewarm strip mounts one Image of every shot in the set, so a
+  // board with no boss fire in flight still reports exactly 1.
+  const PREWARM = 1;
+  const bossShotCount = (): number => {
+    const { ENEMY_SHOTS, BOSS_SHOT } = require('../../game/constants');
+    return countImages(ENEMY_SHOTS[BOSS_SHOT]);
+  };
+
+  const liveBoss = (over: Partial<Card> = {}): Card =>
+    card({
       boss: 'mini',
       y: 150,
       holdY: 150,
       h: 82,
       w: 82,
-      hp: 30,
-      maxHp: 30,
+      hp: 45,
+      maxHp: 45,
       cx: AVATAR_X,
       shipIdx: 0,
+      ...over,
     });
-    const resume = quietState({ cards: [boss], enemyFireTimer: 0.01 });
+
+  it('a boss fires its own patterned volley on its own clock', async () => {
+    const resume = quietState({ cards: [liveBoss()] });
     await renderGame(resume);
-    await advance(200); // one fire event: 1 volley shot + 2 fan shots
-    // All three wear the boss shot — a boss has no archetype, so both its fan
-    // and its volley round fall back to BOSS_SHOT rather than the plain dot.
-    // The hidden prewarm strip mounts one of every shot, hence the fourth.
-    const { ENEMY_SHOTS, BOSS_SHOT } = require('../../game/constants');
-    expect(countImages(ENEMY_SHOTS[BOSS_SHOT])).toBe(4);
+    // enemyFireTimer is parked at 999 by quietState, so nothing the global
+    // volley does can contribute here — every shot below is the boss's own.
+    // A mini opens on `fan`, which is 3 shots every 1.5s.
+    await advance(1600);
+    expect(bossShotCount()).toBe(PREWARM + 3);
+  });
+
+  it('the global volley never fires from a boss', async () => {
+    // REGRESSION. A boss is `kind: 'rage'`, so it used to be picked as a
+    // shooter by the global volley — and on a boss wave it is the ONLY card on
+    // the board, so every volley round came out of the boss on top of its own
+    // pattern. That buried the designed attack under unpatterned aimed fire.
+    //
+    // The volley is opened right up here (fires immediately, then every ~1s)
+    // while staying well inside the boss's own 1.5s opening cadence, so any
+    // shot that appears can only have come from the volley.
+    const resume = quietState({ cards: [liveBoss()], enemyFireTimer: 0.01 });
+    await renderGame(resume);
+    await advance(900);
+    expect(bossShotCount()).toBe(PREWARM);
+  });
+
+  it('a wounded boss changes phase, and the bar agrees with the simulation', async () => {
+    const { bossPhaseIndex, bossPhaseCount } = require('../../game/bosses');
+    // A mini runs three phases, each owning a third of the bar.
+    expect(bossPhaseCount('mini')).toBe(3);
+    expect(bossPhaseIndex(liveBoss({ hp: 45, maxHp: 45 }))).toBe(0);
+    expect(bossPhaseIndex(liveBoss({ hp: 22, maxHp: 45 }))).toBe(1);
+    expect(bossPhaseIndex(liveBoss({ hp: 5, maxHp: 45 }))).toBe(2);
+
+    // The last phase is `lash`, at 0.85s against phase 1's 1.4s, and it throws
+    // 5 shots rather than 3. Advancing an interval phase 1 could not have fired
+    // twice in shows the cadence really did change with the health, not just
+    // the label.
+    const resume = quietState({ cards: [liveBoss({ hp: 5, maxHp: 45 })] });
+    await renderGame(resume);
+    await advance(2300);
+    expect(bossShotCount()).toBeGreaterThan(PREWARM + 5);
   });
 });
 
@@ -764,6 +952,85 @@ describe('GameScreen — zigzag fire & drag movement', () => {
     }
     expect(xs.length).toBeGreaterThanOrEqual(2);
     expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0.5);
+  });
+
+  // --- Steering from anywhere on the screen ---------------------------------
+  // These drive the real PanResponder rather than setting `dragging` directly,
+  // which is the only way to cover the grab itself. A touch used to be ignored
+  // unless it landed within 80px of the hull, and every existing drag test
+  // resumed with `dragging: true` already set — so nothing covered the one
+  // branch that decided whether a touch counted at all.
+  //
+  // PanResponder derives its gestureState from `e.touchHistory`, so a synthetic
+  // event has to carry one or the handler throws before reaching our code.
+  const touch = (pageX: number, pageY: number) => {
+    const timeStamp = Date.now();
+    return {
+      nativeEvent: { pageX, pageY, locationX: pageX, locationY: pageY, timestamp: timeStamp },
+      touchHistory: {
+        numberActiveTouches: 1,
+        indexOfSingleActiveTouch: 0,
+        mostRecentTimeStamp: timeStamp,
+        touchBank: [
+          {
+            touchActive: true,
+            startPageX: pageX,
+            startPageY: pageY,
+            startTimeStamp: timeStamp,
+            currentPageX: pageX,
+            currentPageY: pageY,
+            currentTimeStamp: timeStamp,
+            previousPageX: pageX,
+            previousPageY: pageY,
+            previousTimeStamp: timeStamp,
+          },
+        ],
+      },
+    };
+  };
+
+  const dragFrom = async (
+    from: [number, number],
+    to: [number, number]
+  ): Promise<GameState> => {
+    const resume = quietState({ avatarX: SCREEN.W / 2, avatarY: SCREEN.H / 2 });
+    const { onPersist } = await renderGame(resume);
+    const field = screen.getByTestId('playfield');
+    await act(async () => {
+      fireEvent(field, 'responderGrant', touch(...from));
+      fireEvent(field, 'responderMove', touch(...to));
+    });
+    await advance(600); // let the lerp converge on the new target
+    await fireEvent.press(screen.getByTestId('pause'));
+    return onPersist.mock.calls[0][0];
+  };
+
+  it('moves the ship by the finger\'s travel, not to the finger itself', async () => {
+    const startX = SCREEN.W / 2;
+    const startY = SCREEN.H / 2;
+    // Touch down in the top-left corner, nowhere near the hull at screen
+    // centre, then slide 60px right and 40px up.
+    const snap = await dragFrom([20, 40], [80, 0]);
+    // Tracking the finger's POSITION would have thrown the hull to (80, 0) —
+    // a teleport across the board and straight through anything in between.
+    expect(snap.avatarX).toBeCloseTo(startX + 60, 0);
+    expect(snap.avatarY).toBeCloseTo(startY - 40, 0);
+  });
+
+  it('steers identically wherever the touch started', async () => {
+    // The point of the scheme: distance from the hull is irrelevant. The same
+    // finger travel from the OPPOSITE corner must produce the same movement,
+    // which is what "not obligated to touch the ship" actually means.
+    const snap = await dragFrom([SCREEN.W - 20, SCREEN.H - 40], [SCREEN.W - 80, SCREEN.H]);
+    expect(snap.avatarX).toBeCloseTo(SCREEN.W / 2 - 60, 0);
+    expect(snap.avatarY).toBeCloseTo(SCREEN.H / 2 + 40, 0);
+  });
+
+  it('never teleports the hull on a touch that does not move', async () => {
+    // A tap to reposition your grip must leave the ship exactly where it was.
+    const snap = await dragFrom([30, 700], [30, 700]);
+    expect(snap.avatarX).toBeCloseTo(SCREEN.W / 2, 1);
+    expect(snap.avatarY).toBeCloseTo(SCREEN.H / 2, 1);
   });
 
   it('a dragged rocket lerps to the target and clamps to the play area', async () => {
