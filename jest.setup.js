@@ -7,10 +7,19 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 jest.mock('expo-audio', () => {
   const makePlayer = () => ({
     volume: 1,
+    playing: false,
+    playbackRate: 1,
+    shouldCorrectPitch: true,
     play: jest.fn(),
     pause: jest.fn(),
     seekTo: jest.fn(),
     remove: jest.fn(),
+    // AudioPlayer extends SharedObject, which extends EventEmitter. music.ts
+    // drives its track handoff off 'playbackStatusUpdate', so a player without
+    // addListener is not a faithful double — the tests passed while the real
+    // module would have thrown.
+    addListener: jest.fn(() => ({ remove: jest.fn() })),
+    removeListener: jest.fn(),
   });
   return {
     setAudioModeAsync: jest.fn(() => Promise.resolve()),

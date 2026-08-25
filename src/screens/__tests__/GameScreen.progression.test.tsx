@@ -91,6 +91,7 @@ const renderGame = async (resume?: GameState, shipStats: ShipStats = BASE_SHIP_S
       avatarSpecial={AVATARS[0].special}
       shipStats={shipStats}
       background={BACKGROUNDS[0].set}
+      backgroundId={BACKGROUNDS[0].id}
       resume={resume ?? null}
       onGameOver={onGameOver}
       onPersist={onPersist}

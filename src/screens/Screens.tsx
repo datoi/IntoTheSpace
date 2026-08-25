@@ -12,8 +12,10 @@ import { BOONS, BOON_KINDS } from '../game/pickups';
 import { SaveData } from '../game/storage';
 import { RunResult } from '../game/types';
 import { ShotArt, SpecialDef } from '../game/constants';
+import { Chrome } from '../game/theme';
 import { FONTS, TYPE } from '../game/type';
 import CoinIcon from '../components/Coin';
+import { useChrome, useThemedStyles } from '../components/Theme';
 import Icon, { IconName } from '../components/Icon';
 import { Button, IconButton } from '../components/Button';
 import { RollingNumber, useReduceMotion } from '../components/Motion';
@@ -55,6 +57,8 @@ export function MenuScreen({
   onStats,
   onQuests,
 }: MenuProps) {
+  const styles = useThemedStyles(makeStyles);
+  const c = useChrome();
   const avatar = AVATARS.find((a) => a.id === save.selectedAvatar) ?? AVATARS[0];
   const [showGuide, setShowGuide] = useState(false);
   // A slow bob, so the hull reads as hovering rather than pasted on. Native
@@ -153,7 +157,7 @@ export function MenuScreen({
       </View>
 
       <Pressable onPress={() => setShowGuide(true)} hitSlop={12} style={styles.guideLink}>
-        <Icon name="info" size={12} color={PALETTE.inkDim} />
+        <Icon name="info" size={12} color={c.inkDim} />
         <Text style={styles.guideLinkTxt}>PICK-UPS</Text>
       </Pressable>
 
@@ -172,6 +176,7 @@ interface GuideRow {
 }
 
 function PickupGuide({ avatarShot, onClose }: { avatarShot: ShotArt; onClose: () => void }) {
+  const styles = useThemedStyles(makeStyles);
   // `rotate` is for the GUN pickup art, which still points +x. The player's own
   // bolt is real coloured art pointing up, so it needs neither tint nor rotation.
   const gunBox = (src: number, rotate?: boolean) => (
@@ -257,9 +262,11 @@ function PickupGuide({ avatarShot, onClose }: { avatarShot: ShotArt; onClose: ()
 }
 
 function DeepEarn({ icon, n }: { icon: IconName; n: number }) {
+  const styles = useThemedStyles(makeStyles);
+  const c = useChrome();
   return (
     <View style={styles.deepEarnItem}>
-      <Icon name={icon} size={13} color={PALETTE.ink} />
+      <Icon name={icon} size={13} color={c.ink} />
       <Text style={styles.deepEarnedTxt}>+{n}</Text>
     </View>
   );
@@ -278,6 +285,7 @@ interface OverProps {
 }
 
 export function GameOverScreen({ result, best, bestScore = 0, isNewBest, onRestart, onMenu }: OverProps) {
+  const styles = useThemedStyles(makeStyles);
   const reduceMotion = useReduceMotion();
   return (
     <View style={styles.screen}>
@@ -381,6 +389,8 @@ interface ShopRowProps {
  * fantasy, don't hide it behind a padlock.
  */
 function ShopRow({ name, price, owned, selected, affordable, thumb, special, tier, onPress }: ShopRowProps) {
+  const styles = useThemedStyles(makeStyles);
+  const c = useChrome();
   const locked = !owned && !affordable;
   return (
     <Pressable
@@ -392,7 +402,7 @@ function ShopRow({ name, price, owned, selected, affordable, thumb, special, tie
       ]}
     >
       {/* The tier edge — the card's one piece of identity colour. */}
-      <View style={[styles.shopTierEdge, { backgroundColor: tier ?? PALETTE.edge }]} />
+      <View style={[styles.shopTierEdge, { backgroundColor: tier ?? c.edge }]} />
       <View style={styles.shopBody}>
         <View style={[styles.shopThumb, locked && styles.shopThumbLocked]}>{thumb}</View>
         <View style={{ flex: 1 }}>
@@ -435,6 +445,7 @@ export function ShopScreen({
   onSelectBackground,
   onBack,
 }: ShopProps) {
+  const styles = useThemedStyles(makeStyles);
   const [tab, setTab] = useState<ShopTab>('ships');
 
   return (
@@ -507,482 +518,487 @@ export function ShopScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  wideBtn: { alignSelf: 'stretch', marginTop: 10 },
-  screen: {
-    flex: 1,
-    // Transparent: App mounts the ambient parallax behind every shell, and an
-    // opaque background here would cover it.
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
-    paddingVertical: 60,
-  },
-  menuTopBar: {
-    position: 'absolute',
-    top: 52,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  menuBestLabel: {
-    ...TYPE.micro,
-    color: PALETTE.inkMute,
-  },
-  menuWallet: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  wordmark: { alignItems: 'center', marginBottom: 6 },
-  // The hull on a lit pedestal, with its special named — the menu sells the
-  // ship rather than listing buttons above it.
-  pedestal: { alignItems: 'center', marginBottom: 18 },
-  /**
-   * The hull's own box. Taller than the glow by design — that margin is the
-   * clearance which keeps the disc off the ship's name, and it holds whatever
-   * the name's font metrics turn out to be.
-   */
-  hullSlot: {
-    width: HULL_SLOT,
-    height: HULL_SLOT,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pedestalGlow: {
-    position: 'absolute',
-    width: HULL_GLOW,
-    height: HULL_GLOW,
-    borderRadius: HULL_GLOW / 2,
-    backgroundColor: PALETTE.plasmaGlow,
-    opacity: 0.5,
-  },
-  pedestalShip: {
-    ...TYPE.title,
-    color: PALETTE.ink,
-    marginTop: 8,
-  },
-  pedestalSpecial: {
-    ...TYPE.micro,
-    marginTop: 2,
-  },
-  menuCta: { alignSelf: 'stretch' },
-  rail: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 10,
-    marginTop: 16,
-  },
-  guideLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 18,
-  },
-  kicker: {
-    color: PALETTE.inkDim,
-    fontSize: 12,
-    fontFamily: FONTS.display,
-    letterSpacing: 5,
-    marginBottom: 8,
-  },
-  title: {
-    ...TYPE.displayLItalic,
-    color: PALETTE.ink,
-    fontSize: 58,
-    lineHeight: 60,
-  },
-  titleAccent: { color: PALETTE.plasma },
-  // Centred by hullSlot now, so it carries no margin of its own.
-  menuAvatarImg: { width: 104, height: 116 },
-  menuBestDim: {
-    color: PALETTE.inkDim,
-    fontSize: 12,
-    fontFamily: FONTS.display,
-    letterSpacing: 1,
-  },
-  menuBest: {
-    color: PALETTE.inkDim,
-    fontSize: 14,
-    fontFamily: FONTS.data,
-    letterSpacing: 2,
-  },
-  primary: {
-    backgroundColor: PALETTE.plasma,
-    paddingVertical: 17,
-    paddingHorizontal: 46,
-    borderRadius: 14,
-    marginTop: 6,
-  },
-  primaryTxt: {
-    color: '#04121A',
-    fontSize: 17,
-    fontFamily: FONTS.display,
-    letterSpacing: 2,
-  },
-  secondary: {
-    marginTop: 14,
-    paddingVertical: 13,
-    paddingHorizontal: 40,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  secondaryTxt: {
-    color: PALETTE.ink,
-    fontSize: 14,
-    fontFamily: FONTS.display,
-    letterSpacing: 2,
-  },
-  pressed: { opacity: 0.75 },
-  menuBtnRow: {
-    flexDirection: 'row',
-    gap: 10,
-    alignSelf: 'stretch',
-  },
-  menuBtnHalf: {
-    flex: 1,
-    paddingHorizontal: 0,
-    alignItems: 'center',
-  },
-  menuBtnWide: {
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    paddingHorizontal: 0,
-  },
-  badge: {
-    position: 'absolute',
-    top: -6,
-    right: -6,
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    paddingHorizontal: 5,
-    backgroundColor: PALETTE.threat,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeTxt: {
-    color: PALETTE.ink,
-    fontSize: 11,
-    fontFamily: FONTS.data,
-  },
-  menuLinks: {
-    flexDirection: 'row',
-    gap: 22,
-    marginTop: 16,
-  },
-  guideLinkTxt: {
-    color: PALETTE.gold,
-    fontSize: 12,
-    fontFamily: FONTS.display,
-    letterSpacing: 1.5,
-  },
-  // --- Pick-up guide overlay ---
-  guideOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(6,8,16,0.94)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 26,
-    paddingVertical: 60,
-  },
-  guideTitle: {
-    color: PALETTE.ink,
-    fontSize: 30,
-    fontFamily: FONTS.display,
-    letterSpacing: 4,
-  },
-  guideSub: {
-    color: PALETTE.inkDim,
-    fontSize: 12.5,
-    fontFamily: FONTS.display,
-    letterSpacing: 1,
-    marginTop: 4,
-    marginBottom: 18,
-  },
-  guideList: {
-    alignSelf: 'stretch',
-    flexGrow: 0,
-    flexShrink: 1,
-    marginBottom: 18,
-  },
-  guideRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: PALETTE.hull,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 10,
-    gap: 14,
-  },
-  guideIcon: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  guideIconImg: {
-    width: 40,
-    height: 40,
-  },
-  guideIconEmoji: {
-    fontSize: 30,
-  },
-  guideName: {
-    color: PALETTE.ink,
-    fontSize: 15,
-    fontFamily: FONTS.display,
-    letterSpacing: 0.5,
-  },
-  guideDesc: {
-    color: PALETTE.inkDim,
-    fontSize: 12.5,
-    lineHeight: 17,
-    marginTop: 2,
-  },
-  guideFoot: {
-    ...TYPE.body,
-    color: PALETTE.inkDim,
-    fontSize: 12,
-    lineHeight: 17,
-    textAlign: 'center',
-    marginTop: 4,
-    paddingHorizontal: 6,
-  },
-  hint: {
-    position: 'absolute',
-    bottom: 48,
-    color: PALETTE.inkDim,
-    fontSize: 12.5,
-    textAlign: 'center',
-    lineHeight: 19,
-  },
-  fried: {
-    color: PALETTE.threat,
-    fontSize: 24,
-    fontFamily: FONTS.display,
-    letterSpacing: 4,
-    marginBottom: 14,
-  },
-  distLabel: {
-    color: PALETTE.inkDim,
-    fontSize: 12,
-    fontFamily: FONTS.display,
-    letterSpacing: 5,
-    marginBottom: 2,
-  },
-  bigScore: {
-    // No `fontSize` override — see TYPE.displayXl. Overriding the size here
-    // while inheriting that token's lineHeight is what cropped the score.
-    ...TYPE.displayXl,
-    color: PALETTE.ink,
-  },
-  // No bottom gap on either: the stat row below supplies the spacing.
-  newBest: {
-    color: PALETTE.gold,
-    fontSize: 14,
-    fontFamily: FONTS.display,
-    letterSpacing: 4,
-    marginTop: 8,
-  },
-  overBest: {
-    color: PALETTE.inkDim,
-    fontSize: 14,
-    fontFamily: FONTS.data,
-    letterSpacing: 2,
-    marginTop: 10,
-  },
-  menuStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginTop: 10,
-    marginBottom: 26,
-  },
-  menuCoins: {
-    color: COIN_GOLD,
-    fontSize: 14,
-    fontFamily: FONTS.data,
-    letterSpacing: 1,
-  },
-  shopWallet: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    marginTop: 10,
-    marginBottom: 26,
-  },
-  shopWalletTxt: {
-    color: COIN_GOLD,
-    fontSize: 14,
-    fontFamily: FONTS.data,
-    letterSpacing: 1.5,
-  },
-  shopPriceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginTop: 3,
-  },
-  breakdown: {
-    alignSelf: 'stretch',
-    backgroundColor: PALETTE.hull,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    borderRadius: 14,
-    padding: 12,
-    marginTop: 16,
-  },
-  breakRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 3,
-  },
-  breakLabel: { color: PALETTE.inkDim, fontSize: 12.5 },
-  breakValue: { color: PALETTE.ink, fontSize: 12.5, fontWeight: '800' },
-  overWave: {
-    color: PALETTE.gold,
-    fontSize: 13,
-    fontFamily: FONTS.display,
-    letterSpacing: 2,
-    marginTop: 8,
-  },
-  coinEarned: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 22,
-    marginBottom: 26,
-  },
-  deepEarned: {
-    flexDirection: 'row',
-    gap: 16,
-    marginTop: -14,
-    marginBottom: 22,
-  },
-  deepEarnItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  deepEarnedTxt: {
-    color: PALETTE.ink,
-    fontSize: 13,
-    fontFamily: FONTS.display,
-    letterSpacing: 1,
-  },
-  coinEarnedTxt: {
-    color: COIN_GOLD,
-    fontSize: 15,
-    fontFamily: FONTS.data,
-    letterSpacing: 1.5,
-  },
-  linkBtn: { marginTop: 20 },
-  linkTxt: { color: PALETTE.inkDim, fontSize: 14, fontWeight: '600' },
-  shopTitle: {
-    color: PALETTE.ink,
-    fontSize: 30,
-    fontWeight: '900',
-    letterSpacing: 4,
-  },
-  tabs: {
-    flexDirection: 'row',
-    alignSelf: 'stretch',
-    gap: 8,
-    marginBottom: 4,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    alignItems: 'center',
-  },
-  tabActive: {
-    backgroundColor: PALETTE.hull,
-    borderColor: PALETTE.plasma,
-  },
-  tabTxt: {
-    color: PALETTE.inkDim,
-    fontSize: 12.5,
-    fontFamily: FONTS.display,
-    letterSpacing: 1.5,
-  },
-  tabTxtActive: { color: PALETTE.ink },
-  shopBgThumb: {
-    width: 62,
-    height: 46,
-    borderRadius: 8,
-    backgroundColor: PALETTE.void,
-  },
-  shopList: { alignSelf: 'stretch', marginTop: 8 },
-  shopTierEdge: { height: 2, width: '100%' },
-  shopBody: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 13,
-    gap: 12,
-  },
-  shopThumb: { width: 52, alignItems: 'center' },
-  // A locked hull is dimmed, never hidden — the silhouette and the special are
-  // exactly what is being sold.
-  shopThumbLocked: { opacity: 0.55 },
-  shopHullImg: { width: 50, height: 60 },
-  shopState: { alignItems: 'flex-end', minWidth: 74 },
-  pillFilled: {
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: PALETTE.plasma,
-  },
-  pillFilledTxt: { ...TYPE.micro, color: '#04121A' },
-  pillOutline: {
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: PALETTE.edge,
-  },
-  pillOutlineTxt: { ...TYPE.micro, color: PALETTE.inkDim },
-  pricePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: PALETTE.edge,
-  },
-  pricePillShort: { opacity: 0.6 },
-  priceFig: { fontFamily: FONTS.data, fontSize: 12, color: PALETTE.gold },
-  priceFigShort: { color: PALETTE.inkMute },
-  shopItem: {
-    backgroundColor: PALETTE.hull,
-    borderWidth: 1,
-    borderColor: PALETTE.edge,
-    borderRadius: 12,
-    marginBottom: 10,
-    overflow: 'hidden',
-  },
-  shopItemSelected: { borderColor: PALETTE.plasma },
-  shopEmojiImg: { width: 46, height: 50 },
-  shopName: { color: PALETTE.ink, fontSize: 16, fontWeight: '800' },
-  shopSpecial: {
-    color: PALETTE.plasma,
-    fontSize: 11,
-    fontFamily: FONTS.display,
-    letterSpacing: 1,
-    marginTop: 3,
-  },
-  shopSpecialDesc: {
-    color: PALETTE.inkDim,
-    fontSize: 11.5,
-    lineHeight: 15,
-    marginTop: 1,
-  },
-  shopPrice: { color: PALETTE.inkDim, fontSize: 12.5, fontWeight: '700', marginTop: 2 },
-  locked: { fontSize: 18 },
-});
+// Ground tokens only. The semantic colours - plasma (the player), threat
+// (hostile), gold (reward) - keep their meaning under every sky, so they are
+// deliberately NOT retinted here. See src/game/theme.ts.
+const makeStyles = (c: Chrome) =>
+  StyleSheet.create({
+    wideBtn: { alignSelf: 'stretch', marginTop: 10 },
+    screen: {
+      flex: 1,
+      // Transparent: App mounts the ambient parallax behind every shell, and an
+      // opaque background here would cover it.
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 28,
+      paddingVertical: 60,
+    },
+    menuTopBar: {
+      position: 'absolute',
+      top: 52,
+      left: 20,
+      right: 20,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+    },
+    menuBestLabel: {
+      ...TYPE.micro,
+      color: c.inkMute,
+    },
+    menuWallet: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    wordmark: { alignItems: 'center', marginBottom: 6 },
+    // The hull on a lit pedestal, with its special named — the menu sells the
+    // ship rather than listing buttons above it.
+    pedestal: { alignItems: 'center', marginBottom: 18 },
+    /**
+     * The hull's own box. Taller than the glow by design — that margin is the
+     * clearance which keeps the disc off the ship's name, and it holds whatever
+     * the name's font metrics turn out to be.
+     */
+    hullSlot: {
+      width: HULL_SLOT,
+      height: HULL_SLOT,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    pedestalGlow: {
+      position: 'absolute',
+      width: HULL_GLOW,
+      height: HULL_GLOW,
+      borderRadius: HULL_GLOW / 2,
+      backgroundColor: PALETTE.plasmaGlow,
+      opacity: 0.5,
+    },
+    pedestalShip: {
+      ...TYPE.title,
+      color: c.ink,
+      marginTop: 8,
+    },
+    pedestalSpecial: {
+      ...TYPE.micro,
+      marginTop: 2,
+    },
+    menuCta: { alignSelf: 'stretch' },
+    rail: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 10,
+      marginTop: 16,
+    },
+    guideLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 18,
+    },
+    kicker: {
+      color: c.inkDim,
+      fontSize: 12,
+      fontFamily: FONTS.display,
+      letterSpacing: 5,
+      marginBottom: 8,
+    },
+    title: {
+      ...TYPE.displayLItalic,
+      color: c.ink,
+      fontSize: 58,
+      lineHeight: 60,
+    },
+    // The half of INTO THE SPACE that carries the sky's colour.
+    titleAccent: { color: c.accent },
+    // Centred by hullSlot now, so it carries no margin of its own.
+    menuAvatarImg: { width: 104, height: 116 },
+    menuBestDim: {
+      color: c.inkDim,
+      fontSize: 12,
+      fontFamily: FONTS.display,
+      letterSpacing: 1,
+    },
+    menuBest: {
+      color: c.inkDim,
+      fontSize: 14,
+      fontFamily: FONTS.data,
+      letterSpacing: 2,
+    },
+    primary: {
+      backgroundColor: PALETTE.plasma,
+      paddingVertical: 17,
+      paddingHorizontal: 46,
+      borderRadius: 14,
+      marginTop: 6,
+    },
+    primaryTxt: {
+      color: '#04121A',
+      fontSize: 17,
+      fontFamily: FONTS.display,
+      letterSpacing: 2,
+    },
+    secondary: {
+      marginTop: 14,
+      paddingVertical: 13,
+      paddingHorizontal: 40,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: 'rgba(255,255,255,0.18)',
+    },
+    secondaryTxt: {
+      color: c.ink,
+      fontSize: 14,
+      fontFamily: FONTS.display,
+      letterSpacing: 2,
+    },
+    pressed: { opacity: 0.75 },
+    menuBtnRow: {
+      flexDirection: 'row',
+      gap: 10,
+      alignSelf: 'stretch',
+    },
+    menuBtnHalf: {
+      flex: 1,
+      paddingHorizontal: 0,
+      alignItems: 'center',
+    },
+    menuBtnWide: {
+      alignSelf: 'stretch',
+      alignItems: 'center',
+      paddingHorizontal: 0,
+    },
+    badge: {
+      position: 'absolute',
+      top: -6,
+      right: -6,
+      minWidth: 22,
+      height: 22,
+      borderRadius: 11,
+      paddingHorizontal: 5,
+      backgroundColor: PALETTE.threat,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    badgeTxt: {
+      color: c.ink,
+      fontSize: 11,
+      fontFamily: FONTS.data,
+    },
+    menuLinks: {
+      flexDirection: 'row',
+      gap: 22,
+      marginTop: 16,
+    },
+    guideLinkTxt: {
+      color: PALETTE.gold,
+      fontSize: 12,
+      fontFamily: FONTS.display,
+      letterSpacing: 1.5,
+    },
+    // --- Pick-up guide overlay ---
+    guideOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(6,8,16,0.94)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 26,
+      paddingVertical: 60,
+    },
+    guideTitle: {
+      color: c.ink,
+      fontSize: 30,
+      fontFamily: FONTS.display,
+      letterSpacing: 4,
+    },
+    guideSub: {
+      color: c.inkDim,
+      fontSize: 12.5,
+      fontFamily: FONTS.display,
+      letterSpacing: 1,
+      marginTop: 4,
+      marginBottom: 18,
+    },
+    guideList: {
+      alignSelf: 'stretch',
+      flexGrow: 0,
+      flexShrink: 1,
+      marginBottom: 18,
+    },
+    guideRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.hull,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      borderRadius: 14,
+      padding: 12,
+      marginBottom: 10,
+      gap: 14,
+    },
+    guideIcon: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    guideIconImg: {
+      width: 40,
+      height: 40,
+    },
+    guideIconEmoji: {
+      fontSize: 30,
+    },
+    guideName: {
+      color: c.ink,
+      fontSize: 15,
+      fontFamily: FONTS.display,
+      letterSpacing: 0.5,
+    },
+    guideDesc: {
+      color: c.inkDim,
+      fontSize: 12.5,
+      lineHeight: 17,
+      marginTop: 2,
+    },
+    guideFoot: {
+      ...TYPE.body,
+      color: c.inkDim,
+      fontSize: 12,
+      lineHeight: 17,
+      textAlign: 'center',
+      marginTop: 4,
+      paddingHorizontal: 6,
+    },
+    hint: {
+      position: 'absolute',
+      bottom: 48,
+      color: c.inkDim,
+      fontSize: 12.5,
+      textAlign: 'center',
+      lineHeight: 19,
+    },
+    fried: {
+      color: PALETTE.threat,
+      fontSize: 24,
+      fontFamily: FONTS.display,
+      letterSpacing: 4,
+      marginBottom: 14,
+    },
+    distLabel: {
+      color: c.inkDim,
+      fontSize: 12,
+      fontFamily: FONTS.display,
+      letterSpacing: 5,
+      marginBottom: 2,
+    },
+    bigScore: {
+      // No `fontSize` override — see TYPE.displayXl. Overriding the size here
+      // while inheriting that token's lineHeight is what cropped the score.
+      ...TYPE.displayXl,
+      color: c.ink,
+    },
+    // No bottom gap on either: the stat row below supplies the spacing.
+    newBest: {
+      color: PALETTE.gold,
+      fontSize: 14,
+      fontFamily: FONTS.display,
+      letterSpacing: 4,
+      marginTop: 8,
+    },
+    overBest: {
+      color: c.inkDim,
+      fontSize: 14,
+      fontFamily: FONTS.data,
+      letterSpacing: 2,
+      marginTop: 10,
+    },
+    menuStats: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      marginTop: 10,
+      marginBottom: 26,
+    },
+    menuCoins: {
+      color: COIN_GOLD,
+      fontSize: 14,
+      fontFamily: FONTS.data,
+      letterSpacing: 1,
+    },
+    shopWallet: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+      marginTop: 10,
+      marginBottom: 26,
+    },
+    shopWalletTxt: {
+      color: COIN_GOLD,
+      fontSize: 14,
+      fontFamily: FONTS.data,
+      letterSpacing: 1.5,
+    },
+    shopPriceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      marginTop: 3,
+    },
+    breakdown: {
+      alignSelf: 'stretch',
+      backgroundColor: c.hull,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      borderRadius: 14,
+      padding: 12,
+      marginTop: 16,
+    },
+    breakRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: 3,
+    },
+    breakLabel: { color: c.inkDim, fontSize: 12.5 },
+    breakValue: { color: c.ink, fontSize: 12.5, fontWeight: '800' },
+    overWave: {
+      color: PALETTE.gold,
+      fontSize: 13,
+      fontFamily: FONTS.display,
+      letterSpacing: 2,
+      marginTop: 8,
+    },
+    coinEarned: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 22,
+      marginBottom: 26,
+    },
+    deepEarned: {
+      flexDirection: 'row',
+      gap: 16,
+      marginTop: -14,
+      marginBottom: 22,
+    },
+    deepEarnItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    deepEarnedTxt: {
+      color: c.ink,
+      fontSize: 13,
+      fontFamily: FONTS.display,
+      letterSpacing: 1,
+    },
+    coinEarnedTxt: {
+      color: COIN_GOLD,
+      fontSize: 15,
+      fontFamily: FONTS.data,
+      letterSpacing: 1.5,
+    },
+    linkBtn: { marginTop: 20 },
+    linkTxt: { color: c.inkDim, fontSize: 14, fontWeight: '600' },
+    shopTitle: {
+      color: c.ink,
+      fontSize: 30,
+      fontWeight: '900',
+      letterSpacing: 4,
+    },
+    tabs: {
+      flexDirection: 'row',
+      alignSelf: 'stretch',
+      gap: 8,
+      marginBottom: 4,
+    },
+    tab: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 11,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      alignItems: 'center',
+    },
+    tabActive: {
+      backgroundColor: c.hull,
+      borderColor: PALETTE.plasma,
+    },
+    tabTxt: {
+      color: c.inkDim,
+      fontSize: 12.5,
+      fontFamily: FONTS.display,
+      letterSpacing: 1.5,
+    },
+    tabTxtActive: { color: c.ink },
+    shopBgThumb: {
+      width: 62,
+      height: 46,
+      borderRadius: 8,
+      backgroundColor: c.void,
+    },
+    shopList: { alignSelf: 'stretch', marginTop: 8 },
+    shopTierEdge: { height: 2, width: '100%' },
+    shopBody: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 13,
+      gap: 12,
+    },
+    shopThumb: { width: 52, alignItems: 'center' },
+    // A locked hull is dimmed, never hidden — the silhouette and the special are
+    // exactly what is being sold.
+    shopThumbLocked: { opacity: 0.55 },
+    shopHullImg: { width: 50, height: 60 },
+    shopState: { alignItems: 'flex-end', minWidth: 74 },
+    pillFilled: {
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+      borderRadius: 999,
+      backgroundColor: PALETTE.plasma,
+    },
+    pillFilledTxt: { ...TYPE.micro, color: '#04121A' },
+    pillOutline: {
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: c.edge,
+    },
+    pillOutlineTxt: { ...TYPE.micro, color: c.inkDim },
+    pricePill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: c.edge,
+    },
+    pricePillShort: { opacity: 0.6 },
+    priceFig: { fontFamily: FONTS.data, fontSize: 12, color: PALETTE.gold },
+    priceFigShort: { color: c.inkMute },
+    shopItem: {
+      backgroundColor: c.hull,
+      borderWidth: 1,
+      borderColor: c.edge,
+      borderRadius: 12,
+      marginBottom: 10,
+      overflow: 'hidden',
+    },
+    shopItemSelected: { borderColor: PALETTE.plasma },
+    shopEmojiImg: { width: 46, height: 50 },
+    shopName: { color: c.ink, fontSize: 16, fontWeight: '800' },
+    shopSpecial: {
+      color: PALETTE.plasma,
+      fontSize: 11,
+      fontFamily: FONTS.display,
+      letterSpacing: 1,
+      marginTop: 3,
+    },
+    shopSpecialDesc: {
+      color: c.inkDim,
+      fontSize: 11.5,
+      lineHeight: 15,
+      marginTop: 1,
+    },
+    shopPrice: { color: c.inkDim, fontSize: 12.5, fontWeight: '700', marginTop: 2 },
+    locked: { fontSize: 18 },
+  });

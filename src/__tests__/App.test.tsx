@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { render, screen, fireEvent, act } from '@testing-library/react-native';
 import App from '../../App';
 import { freshRunState } from '../game/runstate';
+import { chromeFor } from '../game/theme';
 import { GameState } from '../game/types';
 import { AVATAR_Y, OB_HIT, DECODE_GRACE_MS, MIN_LOADING_MS, FONT_GRACE_MS } from '../game/constants';
 
@@ -331,6 +332,54 @@ describe('App — backgrounds economy', () => {
     const stored = JSON.parse((await AsyncStorage.getItem(SAVE_KEY))!);
     expect(stored.selectedBackground).toBe('azure');
     expect(stored.likes).toBe(200);
+  });
+
+  it('retints the shell to match the sky the player equips', async () => {
+    // The end of the chain the chrome tests each cover a link of: a shop tap
+    // has to reach the menus' actual pixels. Ember is the clearest case - its
+    // ground is warm where every other theme's is blue - so a shell still
+    // wearing the shipped chrome is unmistakable in the assertion.
+    await AsyncStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        best: 100,
+        likes: 500, // Ember Reach costs 240
+        unlocked: ['ironclad'],
+        selectedAvatar: 'ironclad',
+        unlockedBackgrounds: ['violet'],
+        selectedBackground: 'violet',
+      })
+    );
+    await bootApp();
+
+    // Every backgroundColor currently on screen, read off the rendered tree.
+    const surfaces = (): string[] => {
+      const out: string[] = [];
+      const walk = (node: unknown): void => {
+        if (!node || typeof node !== 'object') return;
+        const n = node as { props?: { style?: unknown }; children?: unknown[] };
+        for (const st of [n.props?.style].flat(Infinity)) {
+          const bg = (st as { backgroundColor?: string } | undefined)?.backgroundColor;
+          if (bg) out.push(bg);
+        }
+        for (const child of n.children ?? []) walk(child);
+      };
+      walk(screen.toJSON());
+      return out;
+    };
+
+    expect(surfaces()).toContain(chromeFor('violet').hull);
+    expect(surfaces()).not.toContain(chromeFor('ember').hull);
+
+    await fireEvent.press(screen.getByText('SHOP'));
+    await fireEvent.press(screen.getByText('BACKGROUNDS'));
+    await fireEvent.press(screen.getByText('Ember Reach'));
+    await advance(10);
+    await fireEvent.press(screen.getByText('BACK'));
+    await advance(10);
+
+    expect(surfaces()).toContain(chromeFor('ember').hull);
+    expect(surfaces()).not.toContain(chromeFor('violet').hull);
   });
 });
 

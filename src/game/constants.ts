@@ -8,6 +8,9 @@ import type { GunKind, SpecialKind } from './types';
 // Type-only: `enemies` imports values from here, so a value import back would
 // close the cycle this file's header warns about.
 import type { ArchKind } from './enemies';
+// Type-only, same leaf rule: theme.ts imports PALETTE and BACKGROUNDS as
+// values, so only the tint shape may travel back in this direction.
+import type { ChromeTint } from './theme';
 
 const { width: W, height: H } = Dimensions.get('window');
 export const SCREEN = { W, H };
@@ -938,10 +941,9 @@ export const PLANET_SPACING = SCREEN.H * 0.58; // vertical gap between planets �
 
 // Planet sprites (SBS 2D Planet Pack, shaded 512 → 256).
 //
-// Only the worlds the three surviving skies actually place. Six more shipped
-// with the pack and were dropped along with the backgrounds that used them —
-// a `require` here is what pulls a file into the bundle, so an unplaced planet
-// is pure download weight.
+// Only the worlds the four skies actually place. Five more shipped with the
+// pack and are still unused — a `require` here is what pulls a file into the
+// bundle, so an unplaced planet is pure download weight.
 const PLANET_REDGIANT = require('../../assets/background/planet_redgiant.png');
 const PLANET_ORANGE = require('../../assets/background/planet_orange.png');
 const PLANET_GLACIAL = require('../../assets/background/planet_glacial.png');
@@ -951,6 +953,15 @@ const PLANET_ARID = require('../../assets/background/planet_arid.png');
 const PLANET_BARREN = require('../../assets/background/planet_barren.png');
 const PLANET_AQUAMARINE = require('../../assets/background/planet_aquamarine.png');
 const PLANET_BLUEGIANT = require('../../assets/background/planet_bluegiant.png');
+// A banded amber gas giant. The one warm world Jade Expanse places, and the
+// only planet added since the original cut: nothing already in the bundle
+// carries that much warmth at that size, and against the emerald it is what
+// stops the whole sky reading as a single colour.
+const PLANET_YELLOWGIANT = require('../../assets/background/planet_yellowgiant.png');
+// A blue world with white cloud decks. The catalogue's other cool planets are
+// flat gas colours; this is the only one with weather on it, which is what lets
+// it hold its own as the near world against Rosette Bloom's very busy sky.
+const PLANET_OCEAN = require('../../assets/background/planet_ocean.png');
 
 // --- The starfield ------------------------------------------------------------
 //
@@ -1005,7 +1016,12 @@ const starLayers = (): BgLayer[] => [
 ];
 
 const SPBG_ASPECT = 1280 / 720;
-const spbgSet = (base: number, far: number, mid: number, near: number): BgSet => ({
+// Takes only the two images it draws. It used to accept `mid` and `near` as
+// well and silently ignore them - and because a `require` is what pulls a file
+// into the bundle, bg2_mid.jpg and bg2_near.jpg were downloaded by every player
+// and never rendered. Dropping the parameters is what makes that unrepeatable:
+// there is now nowhere to pass an image that will not be drawn.
+const spbgSet = (base: number, far: number): BgSet => ({
   base,
   aspect: SPBG_ASPECT,
   mirror: true,
@@ -1033,6 +1049,10 @@ const SBS_STARS_MID = require('../../assets/background/sbs_stars_mid.png');
 const SBS_STARS_NEAR = require('../../assets/background/sbs_stars_near.png');
 const SBS_PURPLE = require('../../assets/background/sbs_purple.png');
 const SBS_BLUE = require('../../assets/background/sbs_blue.png');
+// Shipped an order of magnitude hotter and much flatter than its two siblings;
+// scripts/bake-bg-dim.mjs grades it back into the family before the dim. See
+// the EXPOSURE table there for the measurements.
+const SBS_GREEN = require('../../assets/background/sbs_green.png');
 const sbsSet = (nebula: number): BgSet => ({
   aspect: 1,
   mirror: false,
@@ -1051,6 +1071,12 @@ export interface BackgroundDef {
   price: number; // in coins
   preview: number; // require()'d still shown in the shop
   set: BgSet;
+  /**
+   * The hue the menus borrow while this sky is equipped. Required, so a new
+   * background cannot silently ship wearing another one's chrome. See theme.ts
+   * for how the ramp is derived and why only the ground tokens move.
+   */
+  chrome: ChromeTint;
 }
 
 export const BACKGROUNDS: BackgroundDef[] = [
@@ -1062,6 +1088,10 @@ export const BACKGROUNDS: BackgroundDef[] = [
     name: 'Violet Veil',
     price: 0,
     preview: SBS_PURPLE,
+    // Sampled: the veil's chroma-weighted mean is hsl(252, 39%, 9%). The hue
+    // is used as measured — it is already a comfortable distance from every
+    // semantic colour.
+    chrome: { hue: 252 },
     set: {
       aspect: 1,
       mirror: false,
@@ -1089,6 +1119,10 @@ export const BACKGROUNDS: BackgroundDef[] = [
     name: 'Azure Drift', // teal/blue wisps
     price: 120,
     preview: SBS_BLUE,
+    // Sampled at hsl(215, 46%, 7%) — within a few degrees of the shipped
+    // PALETTE ground, so this theme is very nearly the default. That is
+    // correct rather than a bug: the default chrome was drawn for this sky.
+    chrome: { hue: 215 },
     // Warm worlds pop against the teal/blue.
     set: {
       ...sbsSet(SBS_BLUE),
@@ -1106,12 +1140,16 @@ export const BACKGROUNDS: BackgroundDef[] = [
     name: 'Ember Reach', // stellar_03 — orange wisps on blue-grey
     price: 240,
     preview: require('../../assets/background/bg2_base.jpg'),
+    // Sampled at hsl(4, 23%, 22%), then nudged warmer to 14. At the measured 4
+    // the chrome sits on `vital`'s hue and the panels read as dried blood;
+    // 14 reads as ember, which is what the sky is called. Saturation is pulled
+    // to 0.6 because the ground ramp's ~40% is tuned for blue — the same
+    // number in the reds is brown. That lands near the art's own 23%.
+    chrome: { hue: 14, sat: 0.6 },
     set: {
       ...spbgSet(
         require('../../assets/background/bg2_base.jpg'),
-        require('../../assets/background/bg2_far.jpg'),
-        require('../../assets/background/bg2_mid.jpg'),
-        require('../../assets/background/bg2_near.jpg')
+        require('../../assets/background/bg2_far.jpg')
       ),
       // Cool icy worlds contrasting the warm ember wisps.
       planet: {
@@ -1122,6 +1160,63 @@ export const BACKGROUNDS: BackgroundDef[] = [
         ],
       },
     },
+  },
+  {
+    id: 'jade',
+    name: 'Jade Expanse', // deep emerald cloud, violet-navy voids
+    price: 360,
+    preview: SBS_GREEN,
+    set: {
+      ...sbsSet(SBS_GREEN),
+      // One warm world against the emerald, and two neutrals behind it. The
+      // other three skies each lead with a coloured planet; this one leads with
+      // the only strongly banded surface in the pack, so the contrast here is
+      // texture as much as hue.
+      planet: {
+        items: [
+          { src: PLANET_YELLOWGIANT, xFrac: 0.34, sizeFrac: 0.21, opacity: 0.55 }, // near
+          { src: PLANET_LUNAR, xFrac: 0.72, sizeFrac: 0.1, opacity: 0.43 }, // far
+          { src: PLANET_BARREN, xFrac: 0.52, sizeFrac: 0.15, opacity: 0.5 }, // mid
+        ],
+      },
+    },
+    // Sampled at hsl(155, 81%, 6%), then nudged to 168. At the measured 155 the
+    // ACCENT - LIFT OFF, CONTINUE, the title's SPACE - lands on `energy`, the
+    // special-meter green, and the pause menu would put a green CTA next to a
+    // green charge bar. 168 is the midpoint of the only clear window in that
+    // part of the wheel: `energy` sits at 144 and `plasma` (the player) at 192,
+    // so this is the furthest an honest reading of this art can get from both.
+    chrome: { hue: 168 },
+  },
+  {
+    id: 'rosette',
+    name: 'Rosette Bloom', // bg0, graded off its native red into rose
+    price: 480,
+    preview: require('../../assets/background/bg0_base.jpg'),
+    set: {
+      ...spbgSet(
+        require('../../assets/background/bg0_base.jpg'),
+        require('../../assets/background/bg0_far.jpg')
+      ),
+      // Cool worlds against the warm rose, and the sky is dense enough that
+      // they run smaller and fainter than the other sets' - a full-size planet
+      // over this much structure reads as clutter rather than distance.
+      planet: {
+        items: [
+          { src: PLANET_OCEAN, xFrac: 0.29, sizeFrac: 0.18, opacity: 0.5 }, // near
+          { src: PLANET_LUNAR, xFrac: 0.71, sizeFrac: 0.09, opacity: 0.38 }, // far
+          { src: PLANET_AQUAMARINE, xFrac: 0.5, sizeFrac: 0.13, opacity: 0.44 }, // mid
+        ],
+      },
+    },
+    // The graded art measures 323; the chrome sits at 308.
+    //
+    // This is the tightest nudge in the catalogue and it is bought with the
+    // ACCENT, not the ground. `threatAlt` - the elite aura - is at 330, so an
+    // accent taken straight from the art would put a CTA seven degrees from the
+    // colour that means "this one is dangerous". 308 clears it by 22 while
+    // still reading as the same rose the sky is made of.
+    chrome: { hue: 308 },
   },
 ];
 

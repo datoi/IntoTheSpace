@@ -4,10 +4,12 @@ import { MenuScreen, GameOverScreen, ShopScreen } from '../Screens';
 import { SaveData, DEFAULT_SAVE } from '../../game/storage';
 import { RunResult } from '../../game/types';
 import { AVATARS } from '../../game/constants';
+import { ThemeProvider } from '../../components/Theme';
+import { chromeFor } from '../../game/theme';
 
 const freshSave: SaveData = { ...DEFAULT_SAVE };
 
-const flatten = (style: unknown): Record<string, number> =>
+const flatten = (style: unknown): Record<string, any> =>
   Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
 
 describe('MenuScreen', () => {
@@ -16,6 +18,33 @@ describe('MenuScreen', () => {
     expect(screen.getByText('SPACE')).toBeTruthy();
     expect(screen.queryByText(/BEST/)).toBeNull();
     expect(screen.getByText('40')).toBeTruthy();
+  });
+
+  it('paints the SPACE half of the title in the equipped sky', async () => {
+    // INTO THE stays ink; SPACE is the accent, and the accent follows the sky.
+    const menu = (
+      <MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />
+    );
+    await render(<ThemeProvider backgroundId="ember">{menu}</ThemeProvider>);
+    expect(flatten(screen.getByText('SPACE').props.style).color).toBe(chromeFor('ember').accent);
+    // Its other half does NOT take the accent - the contrast between the two
+    // lines is the whole reason the title is split across two Texts.
+    expect(flatten(screen.getByText('INTO THE').props.style).color).not.toBe(
+      chromeFor('ember').accent
+    );
+
+    await screen.rerender(<ThemeProvider backgroundId="violet">{menu}</ThemeProvider>);
+    expect(flatten(screen.getByText('SPACE').props.style).color).toBe(chromeFor('violet').accent);
+  });
+
+  it('paints LIFT OFF in the equipped sky', async () => {
+    const menu = (
+      <MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />
+    );
+    await render(<ThemeProvider backgroundId="violet">{menu}</ThemeProvider>);
+    expect(flatten(screen.getByText('LIFT OFF').props.style).color).toBe(
+      chromeFor('violet').accentInk
+    );
   });
 
   it('leads with the best SCORE, and keeps best depth beside it', async () => {

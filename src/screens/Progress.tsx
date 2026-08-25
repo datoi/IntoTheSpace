@@ -8,6 +8,7 @@
 import React, { useState } from 'react';
 import { View, Text, Image, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { PALETTE, AVATARS, COIN_GOLD } from '../game/constants';
+import { Chrome } from '../game/theme';
 import { SaveData, balanceOf } from '../game/storage';
 import {
   CURRENCY_DEFS,
@@ -29,6 +30,7 @@ import {
 } from '../game/upgrades';
 import { FONTS } from '../game/type';
 import CoinIcon from '../components/Coin';
+import { useThemedStyles } from '../components/Theme';
 import { Button } from '../components/Button';
 import Icon from '../components/Icon';
 
@@ -36,6 +38,7 @@ import Icon from '../components/Icon';
 
 /** The wallet strip both screens show at the top. */
 function WalletRow({ save }: { save: SaveData }) {
+  const styles = useThemedStyles(makeStyles);
   const bal = balanceOf(save);
   // Coins always show; the deep currencies appear once the player has any, so a
   // new player isn't confronted with three zeroed resources they've never seen.
@@ -58,6 +61,7 @@ function WalletRow({ save }: { save: SaveData }) {
 
 /** A price rendered across however many currencies it spans. */
 function PriceTag({ price, affordable }: { price: Price; affordable: boolean }) {
+  const styles = useThemedStyles(makeStyles);
   const parts = priceParts(price);
   return (
     <View style={styles.priceRow}>
@@ -77,6 +81,7 @@ function PriceTag({ price, affordable }: { price: Price; affordable: boolean }) 
 
 /** Level pips — a filled run of blocks, so progress reads without arithmetic. */
 function LevelPips({ level, max }: { level: number; max: number }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.pips}>
       {Array.from({ length: max }, (_, i) => (
@@ -98,6 +103,7 @@ interface HangarProps {
 }
 
 export function HangarScreen({ save, shipStats, onBuyUpgrade, onSelectAvatar, onBack }: HangarProps) {
+  const styles = useThemedStyles(makeStyles);
   // Upgrades are per-hull, so the screen needs a hull picker: the row of owned
   // ships doubles as "which one am I investing in".
   const owned = AVATARS.filter((a) => save.unlocked.includes(a.id));
@@ -273,6 +279,7 @@ const groupsOf = (stats: Stats, best: number): { title: string; rows: StatRow[] 
 };
 
 export function StatsScreen({ save, onBack }: { save: SaveData; onBack: () => void }) {
+  const styles = useThemedStyles(makeStyles);
   const groups = groupsOf(save.stats, save.best);
   return (
     <View style={styles.screen}>
@@ -296,183 +303,187 @@ export function StatsScreen({ save, onBack }: { save: SaveData; onBack: () => vo
   );
 }
 
-const styles = StyleSheet.create({
-  wideBtn: { alignSelf: 'stretch', marginTop: 10 },
-  screen: {
-    flex: 1,
-    // Transparent: App mounts the ambient parallax behind every shell, and an
-    // opaque background here would cover it.
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 56,
-    paddingBottom: 28,
-  },
-  title: {
-    color: PALETTE.ink,
-    fontSize: 28,
-    fontFamily: FONTS.display,
-    letterSpacing: 4,
-  },
-  pressed: { opacity: 0.72 },
-  secondary: {
-    marginTop: 12,
-    paddingVertical: 13,
-    paddingHorizontal: 40,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  secondaryTxt: {
-    color: PALETTE.ink,
-    fontSize: 14,
-    fontFamily: FONTS.display,
-    letterSpacing: 2,
-  },
-  // --- Wallet ---
-  wallet: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    marginTop: 10,
-    marginBottom: 12,
-  },
-  walletItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  walletTxt: {
-    color: COIN_GOLD,
-    fontSize: 13,
-    fontFamily: FONTS.display,
-    letterSpacing: 0.8,
-  },
-  // --- Hull picker ---
-  shipStrip: { alignSelf: 'stretch', flexGrow: 0, marginBottom: 10 },
-  shipChip: {
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    backgroundColor: PALETTE.hull,
-  },
-  shipChipActive: { borderColor: PALETTE.plasma },
-  shipChipImg: { width: 34, height: 38 },
-  shipChipTxt: {
-    color: PALETTE.inkDim,
-    fontSize: 10.5,
-    fontFamily: FONTS.display,
-    letterSpacing: 0.5,
-    marginTop: 3,
-  },
-  shipChipTxtActive: { color: PALETTE.ink },
-  // --- Summary ---
-  summary: {
-    alignSelf: 'stretch',
-    backgroundColor: PALETTE.hull,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 10,
-  },
-  summaryTitle: {
-    color: PALETTE.ink,
-    fontSize: 15,
-    fontFamily: FONTS.display,
-    letterSpacing: 1,
-  },
-  summaryLine: {
-    color: PALETTE.inkDim,
-    fontSize: 11.5,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  equipBtn: {
-    marginTop: 9,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: PALETTE.plasma,
-    alignItems: 'center',
-  },
-  equipTxt: {
-    color: PALETTE.plasma,
-    fontSize: 11.5,
-    fontFamily: FONTS.display,
-    letterSpacing: 1.5,
-  },
-  // --- Upgrade rows ---
-  list: { alignSelf: 'stretch', flex: 1 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: PALETTE.hull,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 9,
-    gap: 11,
-  },
-  rowName: { color: PALETTE.ink, fontSize: 14.5, fontWeight: '800' },
-  rowLevel: { color: PALETTE.inkDim, fontSize: 12, fontWeight: '700' },
-  rowDesc: { color: PALETTE.inkDim, fontSize: 11.5, lineHeight: 15, marginTop: 1 },
-  rowPerLevel: {
-    color: PALETTE.plasma,
-    fontSize: 10.5,
-    fontFamily: FONTS.display,
-    letterSpacing: 0.3,
-    marginTop: 3,
-  },
-  rowRight: { alignItems: 'flex-end', minWidth: 74 },
-  pips: { flexDirection: 'row', gap: 3, marginTop: 5 },
-  pip: {
-    width: 11,
-    height: 5,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-  },
-  pipFilled: { backgroundColor: PALETTE.plasma },
-  priceRow: { alignItems: 'flex-end', gap: 2 },
-  priceItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  priceTxt: { color: COIN_GOLD, fontSize: 12, fontWeight: '900' },
-  priceTxtShort: { color: PALETTE.inkDim },
-  buyHint: {
-    color: PALETTE.inkDim,
-    fontSize: 9,
-    fontFamily: FONTS.display,
-    letterSpacing: 0.5,
-    marginTop: 4,
-  },
-  buyHintOn: { color: PALETTE.plasma },
-  maxed: {
-    color: PALETTE.gold,
-    fontSize: 12,
-    fontFamily: FONTS.display,
-    letterSpacing: 1.5,
-  },
-  // --- Statistics ---
-  statGroup: {
-    backgroundColor: PALETTE.hull,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    borderRadius: 14,
-    padding: 13,
-    marginBottom: 10,
-  },
-  statGroupTitle: {
-    color: PALETTE.plasma,
-    fontSize: 11,
-    fontFamily: FONTS.display,
-    letterSpacing: 2.5,
-    marginBottom: 7,
-  },
-  statRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 3.5,
-  },
-  statLabel: { color: PALETTE.inkDim, fontSize: 12.5, flex: 1 },
-  statValue: { color: PALETTE.ink, fontSize: 12.5, fontWeight: '800' },
-});
+// Ground tokens only. The semantic colours - plasma (the player), threat
+// (hostile), gold (reward) - keep their meaning under every sky, so they are
+// deliberately NOT retinted here. See src/game/theme.ts.
+const makeStyles = (c: Chrome) =>
+  StyleSheet.create({
+    wideBtn: { alignSelf: 'stretch', marginTop: 10 },
+    screen: {
+      flex: 1,
+      // Transparent: App mounts the ambient parallax behind every shell, and an
+      // opaque background here would cover it.
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: 56,
+      paddingBottom: 28,
+    },
+    title: {
+      color: c.ink,
+      fontSize: 28,
+      fontFamily: FONTS.display,
+      letterSpacing: 4,
+    },
+    pressed: { opacity: 0.72 },
+    secondary: {
+      marginTop: 12,
+      paddingVertical: 13,
+      paddingHorizontal: 40,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: 'rgba(255,255,255,0.18)',
+    },
+    secondaryTxt: {
+      color: c.ink,
+      fontSize: 14,
+      fontFamily: FONTS.display,
+      letterSpacing: 2,
+    },
+    // --- Wallet ---
+    wallet: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      marginTop: 10,
+      marginBottom: 12,
+    },
+    walletItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    walletTxt: {
+      color: COIN_GOLD,
+      fontSize: 13,
+      fontFamily: FONTS.display,
+      letterSpacing: 0.8,
+    },
+    // --- Hull picker ---
+    shipStrip: { alignSelf: 'stretch', flexGrow: 0, marginBottom: 10 },
+    shipChip: {
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      marginRight: 8,
+      borderRadius: 12,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      backgroundColor: c.hull,
+    },
+    shipChipActive: { borderColor: PALETTE.plasma },
+    shipChipImg: { width: 34, height: 38 },
+    shipChipTxt: {
+      color: c.inkDim,
+      fontSize: 10.5,
+      fontFamily: FONTS.display,
+      letterSpacing: 0.5,
+      marginTop: 3,
+    },
+    shipChipTxtActive: { color: c.ink },
+    // --- Summary ---
+    summary: {
+      alignSelf: 'stretch',
+      backgroundColor: c.hull,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      borderRadius: 14,
+      padding: 12,
+      marginBottom: 10,
+    },
+    summaryTitle: {
+      color: c.ink,
+      fontSize: 15,
+      fontFamily: FONTS.display,
+      letterSpacing: 1,
+    },
+    summaryLine: {
+      color: c.inkDim,
+      fontSize: 11.5,
+      lineHeight: 16,
+      marginTop: 2,
+    },
+    equipBtn: {
+      marginTop: 9,
+      paddingVertical: 8,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: PALETTE.plasma,
+      alignItems: 'center',
+    },
+    equipTxt: {
+      color: PALETTE.plasma,
+      fontSize: 11.5,
+      fontFamily: FONTS.display,
+      letterSpacing: 1.5,
+    },
+    // --- Upgrade rows ---
+    list: { alignSelf: 'stretch', flex: 1 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.hull,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      borderRadius: 14,
+      padding: 12,
+      marginBottom: 9,
+      gap: 11,
+    },
+    rowName: { color: c.ink, fontSize: 14.5, fontWeight: '800' },
+    rowLevel: { color: c.inkDim, fontSize: 12, fontWeight: '700' },
+    rowDesc: { color: c.inkDim, fontSize: 11.5, lineHeight: 15, marginTop: 1 },
+    rowPerLevel: {
+      color: PALETTE.plasma,
+      fontSize: 10.5,
+      fontFamily: FONTS.display,
+      letterSpacing: 0.3,
+      marginTop: 3,
+    },
+    rowRight: { alignItems: 'flex-end', minWidth: 74 },
+    pips: { flexDirection: 'row', gap: 3, marginTop: 5 },
+    pip: {
+      width: 11,
+      height: 5,
+      borderRadius: 2,
+      backgroundColor: 'rgba(255,255,255,0.14)',
+    },
+    pipFilled: { backgroundColor: PALETTE.plasma },
+    priceRow: { alignItems: 'flex-end', gap: 2 },
+    priceItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    priceTxt: { color: COIN_GOLD, fontSize: 12, fontWeight: '900' },
+    priceTxtShort: { color: c.inkDim },
+    buyHint: {
+      color: c.inkDim,
+      fontSize: 9,
+      fontFamily: FONTS.display,
+      letterSpacing: 0.5,
+      marginTop: 4,
+    },
+    buyHintOn: { color: PALETTE.plasma },
+    maxed: {
+      color: PALETTE.gold,
+      fontSize: 12,
+      fontFamily: FONTS.display,
+      letterSpacing: 1.5,
+    },
+    // --- Statistics ---
+    statGroup: {
+      backgroundColor: c.hull,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      borderRadius: 14,
+      padding: 13,
+      marginBottom: 10,
+    },
+    statGroupTitle: {
+      color: PALETTE.plasma,
+      fontSize: 11,
+      fontFamily: FONTS.display,
+      letterSpacing: 2.5,
+      marginBottom: 7,
+    },
+    statRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 3.5,
+    },
+    statLabel: { color: c.inkDim, fontSize: 12.5, flex: 1 },
+    statValue: { color: c.ink, fontSize: 12.5, fontWeight: '800' },
+  });

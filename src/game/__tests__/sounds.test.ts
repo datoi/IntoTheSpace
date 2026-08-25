@@ -25,11 +25,15 @@ describe('initSounds', () => {
 describe('play', () => {
   beforeAll(() => initSounds());
 
-  const playerFor = (call: number) => mockCreate.mock.results[call].value;
+  // Players are created in declaration order, so a name's position on the board
+  // IS its player index. Derived rather than hardcoded: these were fixed numbers
+  // until retiring an effect shifted every one of them and quietly pointed each
+  // assertion at the wrong player.
+  const playerFor = (name: (typeof SOUND_NAMES)[number]) =>
+    mockCreate.mock.results[SOUND_NAMES.indexOf(name)].value;
 
   it('seeks to 0, sets volume, and plays the named effect', () => {
-    // buzz is the 6th source (index 5) in declaration order.
-    const buzz = playerFor(5);
+    const buzz = playerFor('buzz');
     play('buzz', 0.7);
     expect(buzz.volume).toBe(0.7);
     expect(buzz.seekTo).toHaveBeenCalledWith(0);
@@ -37,13 +41,13 @@ describe('play', () => {
   });
 
   it('defaults volume to 1', () => {
-    const ding = playerFor(6);
-    play('ding');
-    expect(ding.volume).toBe(1);
+    const gameover = playerFor('gameover');
+    play('gameover');
+    expect(gameover.volume).toBe(1);
   });
 
   it('survives a player that throws mid-playback', () => {
-    const whoosh = playerFor(7);
+    const whoosh = playerFor('whoosh');
     whoosh.play.mockImplementationOnce(() => {
       throw new Error('audio session lost');
     });
@@ -99,7 +103,7 @@ describe('playShot', () => {
   const realNow = Date.now;
 
   beforeEach(() => {
-    for (const n of ['shot', 'shot_laser', 'shot_bomb']) voice(n).play.mockClear();
+    for (const n of ['shot_double', 'shot_laser', 'shot_bomb', 'shot_homing']) voice(n).play.mockClear();
     clock += 10_000; // well past SHOT_MIN_GAP_MS, so each test starts unthrottled
     jest.spyOn(Date, 'now').mockImplementation(() => clock);
   });
@@ -108,28 +112,46 @@ describe('playShot', () => {
     Date.now = realNow;
   });
 
-  it('gives the laser and the bomb their own voice', () => {
-    playShot('laser');
-    expect(voice('shot_laser').play).toHaveBeenCalledTimes(1);
-    expect(voice('shot').play).not.toHaveBeenCalled();
+  it('gives every non-default gun its own voice', () => {
+    for (const [gun, want] of [
+      ['double', 'shot_double'],
+      ['laser', 'shot_laser'],
+      ['bomb', 'shot_bomb'],
+      ['homing', 'shot_homing'],
+    ] as const) {
+      clock += 10_000;
+      playShot(gun);
+      expect(voice(want).play).toHaveBeenCalledTimes(1);
+    }
   });
 
-  it('falls back to the default bolt for every other gun', () => {
-    // 'single', 'double' and 'homing' all fire the same bolt — only the two
-    // guns with a genuinely different shape get their own sample.
-    playShot('double');
-    expect(voice('shot').play).toHaveBeenCalledTimes(1);
+  it('leaves the default gun silent', () => {
+    // 'single' is the gun you hold for most of a run and fires several times a
+    // second; it has no voice at all, which is what makes picking up any other
+    // gun audibly change the run. Nothing on the board may sound for it.
+    playShot('single');
+    for (const n of ['shot_double', 'shot_laser', 'shot_bomb', 'shot_homing']) {
+      expect(voice(n).play).not.toHaveBeenCalled();
+    }
+  });
+
+  it('does not let the silent default consume the throttle window', () => {
+    // The bail happens before the throttle is stamped, so a stream of silent
+    // default shots cannot swallow the next real shot from a picked-up gun.
+    playShot('single');
+    playShot('laser');
+    expect(voice('shot_laser').play).toHaveBeenCalledTimes(1);
   });
 
   it('is audible — the placeholder played at 0.1 and could not be heard', () => {
-    playShot('single');
-    expect(voice('shot').volume).toBeGreaterThan(0.25);
+    playShot('laser');
+    expect(voice('shot_laser').volume).toBeGreaterThan(0.25);
   });
 
   it('throttles a sustained stream so a stacked gun cannot rattle', () => {
-    playShot('single');
-    playShot('single');
-    playShot('single');
-    expect(voice('shot').play).toHaveBeenCalledTimes(1);
+    playShot('laser');
+    playShot('laser');
+    playShot('laser');
+    expect(voice('shot_laser').play).toHaveBeenCalledTimes(1);
   });
 });

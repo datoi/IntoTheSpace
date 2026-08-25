@@ -8,6 +8,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { PALETTE, COIN_GOLD } from '../game/constants';
+import { Chrome } from '../game/theme';
 import { SaveData } from '../game/storage';
 import { CURRENCY_DEFS, Currency, Price, priceParts } from '../game/progression';
 import {
@@ -29,6 +30,7 @@ import {
 } from '../game/missions';
 import { FONTS } from '../game/type';
 import CoinIcon from '../components/Coin';
+import { useChrome, useThemedStyles } from '../components/Theme';
 import { Button } from '../components/Button';
 import Icon from '../components/Icon';
 
@@ -46,6 +48,7 @@ interface Props {
 // ---------- Shared pieces ----------
 
 function RewardTag({ reward }: { reward: Reward }) {
+  const styles = useThemedStyles(makeStyles);
   const parts: { currency: Currency; amount: number }[] = reward.currencies
     ? priceParts(reward.currencies as Price)
     : [];
@@ -76,6 +79,8 @@ interface QuestRowProps {
 }
 
 function QuestRow({ quest, save, runBests, claimed, onClaim }: QuestRowProps) {
+  const styles = useThemedStyles(makeStyles);
+  const c = useChrome();
   const done = isComplete(quest.objective, save.stats, runBests, quest.id);
   const current = progressOf(quest.objective, save.stats, runBests, quest.id);
   const target = quest.objective.target;
@@ -93,7 +98,7 @@ function QuestRow({ quest, save, runBests, claimed, onClaim }: QuestRowProps) {
         pressed && styles.pressed,
       ]}
     >
-      <Icon name={quest.icon} size={21} color={claimed ? PALETTE.inkMute : PALETTE.gold} />
+      <Icon name={quest.icon} size={21} color={claimed ? c.inkMute : PALETTE.gold} />
       <View style={{ flex: 1 }}>
         <Text style={[styles.rowName, claimed && styles.dimmed]}>{quest.name}</Text>
         <Text style={styles.rowDesc}>{quest.desc}</Text>
@@ -140,6 +145,7 @@ function LoginCalendar({
   now: number;
   onClaimLogin: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const { login } = save.quests;
   const available = canClaimLogin(login, now);
   const highlight = nextLoginDay(login, now);
@@ -204,6 +210,7 @@ function LoginCalendar({
 // ---------- Screen ----------
 
 export function QuestsScreen({ save, now = Date.now(), onClaim, onClaimLogin, onBack }: Props) {
+  const styles = useThemedStyles(makeStyles);
   const [tab, setTab] = useState<Tab>('missions');
   const { quests } = save;
 
@@ -325,138 +332,142 @@ export function QuestsScreen({ save, now = Date.now(), onClaim, onClaimLogin, on
   );
 }
 
-const styles = StyleSheet.create({
-  wideBtn: { alignSelf: 'stretch', marginTop: 10 },
-  screen: {
-    flex: 1,
-    // Transparent: App mounts the ambient parallax behind every shell, and an
-    // opaque background here would cover it.
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingTop: 56,
-    paddingBottom: 26,
-  },
-  title: {
-    color: PALETTE.ink,
-    fontSize: 26,
-    fontFamily: FONTS.display,
-    letterSpacing: 4,
-    marginBottom: 12,
-  },
-  pressed: { opacity: 0.72 },
-  secondary: {
-    marginTop: 10,
-    paddingVertical: 13,
-    paddingHorizontal: 40,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  secondaryTxt: { color: PALETTE.ink, fontSize: 14,
-    fontFamily: FONTS.display, fontWeight: '800', letterSpacing: 2 },
-  tabs: { flexDirection: 'row', alignSelf: 'stretch', gap: 6, marginBottom: 8 },
-  tab: {
-    flex: 1,
-    paddingVertical: 9,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    alignItems: 'center',
-  },
-  tabActive: { backgroundColor: PALETTE.hull, borderColor: PALETTE.plasma },
-  tabTxt: { color: PALETTE.inkDim, fontSize: 10.5, fontWeight: '900', letterSpacing: 1 },
-  tabTxtActive: { color: PALETTE.ink },
-  list: { alignSelf: 'stretch', flex: 1 },
-  sectionNote: {
-    color: PALETTE.inkDim,
-    fontSize: 10.5,
-    fontFamily: FONTS.display,
-    letterSpacing: 1.4,
-    marginTop: 10,
-    marginBottom: 7,
-  },
-  // --- Quest row ---
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: PALETTE.hull,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    borderRadius: 13,
-    padding: 11,
-    marginBottom: 8,
-    gap: 10,
-  },
-  rowClaimable: { borderColor: PALETTE.gold, backgroundColor: 'rgba(255,201,60,0.10)' },
-  rowClaimed: { opacity: 0.55 },
-  dimmed: { color: PALETTE.inkDim },
-  rowName: { color: PALETTE.ink, fontSize: 13.5, fontWeight: '800' },
-  rowDesc: { color: PALETTE.inkDim, fontSize: 11, lineHeight: 14.5, marginTop: 1 },
-  rowProgress: { color: PALETTE.inkDim, fontSize: 10, fontWeight: '700', marginTop: 2 },
-  barTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    overflow: 'hidden',
-    marginTop: 5,
-  },
-  barFill: { height: '100%', borderRadius: 2, backgroundColor: PALETTE.gold },
-  barFillDone: { backgroundColor: PALETTE.gold },
-  rowRight: { alignItems: 'flex-end', minWidth: 70 },
-  rewardRow: { alignItems: 'flex-end', gap: 2 },
-  rewardItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  rewardTxt: { color: COIN_GOLD, fontSize: 11, fontWeight: '900' },
-  claimTxt: {
-    color: PALETTE.gold,
-    fontSize: 8.5,
-    fontFamily: FONTS.display,
-    letterSpacing: 0.4,
-    marginTop: 4,
-  },
-  claimedTxt: {
-    color: PALETTE.inkDim,
-    fontSize: 8.5,
-    fontFamily: FONTS.display,
-    letterSpacing: 0.4,
-    marginTop: 4,
-  },
-  lockedTxt: { color: PALETTE.inkDim, fontSize: 10,
-    fontFamily: FONTS.display, fontWeight: '800', marginTop: 4 },
-  // --- Login calendar ---
-  loginBox: {
-    backgroundColor: PALETTE.hull,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    borderRadius: 14,
-    padding: 12,
-    marginTop: 8,
-  },
-  loginTitle: { color: PALETTE.ink, fontSize: 13,
-    fontFamily: FONTS.display, fontWeight: '900', letterSpacing: 1.6 },
-  loginSub: { color: PALETTE.inkDim, fontSize: 11, marginTop: 2, marginBottom: 9 },
-  loginGrid: { flexDirection: 'row', gap: 4, justifyContent: 'space-between' },
-  loginCell: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: PALETTE.edge,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-  },
-  loginCellPast: { opacity: 0.45 },
-  loginCellToday: { borderColor: PALETTE.gold, backgroundColor: 'rgba(255,201,60,0.10)' },
-  loginDay: { color: PALETTE.inkDim, fontSize: 9, fontWeight: '900' },
-  loginDayToday: { color: PALETTE.gold },
-  loginAmt: { color: COIN_GOLD, fontSize: 10.5, fontWeight: '900', marginTop: 1 },
-  loginBtn: {
-    marginTop: 10,
-    paddingVertical: 10,
-    borderRadius: 11,
-    backgroundColor: PALETTE.gold,
-    alignItems: 'center',
-  },
-  loginBtnDone: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: PALETTE.edge },
-  loginBtnTxt: { color: '#221703', fontSize: 12, fontWeight: '900', letterSpacing: 1.4 },
-  loginBtnTxtDone: { color: PALETTE.inkDim },
-});
+// Ground tokens only. The semantic colours - plasma (the player), threat
+// (hostile), gold (reward) - keep their meaning under every sky, so they are
+// deliberately NOT retinted here. See src/game/theme.ts.
+const makeStyles = (c: Chrome) =>
+  StyleSheet.create({
+    wideBtn: { alignSelf: 'stretch', marginTop: 10 },
+    screen: {
+      flex: 1,
+      // Transparent: App mounts the ambient parallax behind every shell, and an
+      // opaque background here would cover it.
+      alignItems: 'center',
+      paddingHorizontal: 18,
+      paddingTop: 56,
+      paddingBottom: 26,
+    },
+    title: {
+      color: c.ink,
+      fontSize: 26,
+      fontFamily: FONTS.display,
+      letterSpacing: 4,
+      marginBottom: 12,
+    },
+    pressed: { opacity: 0.72 },
+    secondary: {
+      marginTop: 10,
+      paddingVertical: 13,
+      paddingHorizontal: 40,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: 'rgba(255,255,255,0.18)',
+    },
+    secondaryTxt: { color: c.ink, fontSize: 14,
+      fontFamily: FONTS.display, fontWeight: '800', letterSpacing: 2 },
+    tabs: { flexDirection: 'row', alignSelf: 'stretch', gap: 6, marginBottom: 8 },
+    tab: {
+      flex: 1,
+      paddingVertical: 9,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      alignItems: 'center',
+    },
+    tabActive: { backgroundColor: c.hull, borderColor: PALETTE.plasma },
+    tabTxt: { color: c.inkDim, fontSize: 10.5, fontWeight: '900', letterSpacing: 1 },
+    tabTxtActive: { color: c.ink },
+    list: { alignSelf: 'stretch', flex: 1 },
+    sectionNote: {
+      color: c.inkDim,
+      fontSize: 10.5,
+      fontFamily: FONTS.display,
+      letterSpacing: 1.4,
+      marginTop: 10,
+      marginBottom: 7,
+    },
+    // --- Quest row ---
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.hull,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      borderRadius: 13,
+      padding: 11,
+      marginBottom: 8,
+      gap: 10,
+    },
+    rowClaimable: { borderColor: PALETTE.gold, backgroundColor: 'rgba(255,201,60,0.10)' },
+    rowClaimed: { opacity: 0.55 },
+    dimmed: { color: c.inkDim },
+    rowName: { color: c.ink, fontSize: 13.5, fontWeight: '800' },
+    rowDesc: { color: c.inkDim, fontSize: 11, lineHeight: 14.5, marginTop: 1 },
+    rowProgress: { color: c.inkDim, fontSize: 10, fontWeight: '700', marginTop: 2 },
+    barTrack: {
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: 'rgba(255,255,255,0.12)',
+      overflow: 'hidden',
+      marginTop: 5,
+    },
+    barFill: { height: '100%', borderRadius: 2, backgroundColor: PALETTE.gold },
+    barFillDone: { backgroundColor: PALETTE.gold },
+    rowRight: { alignItems: 'flex-end', minWidth: 70 },
+    rewardRow: { alignItems: 'flex-end', gap: 2 },
+    rewardItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    rewardTxt: { color: COIN_GOLD, fontSize: 11, fontWeight: '900' },
+    claimTxt: {
+      color: PALETTE.gold,
+      fontSize: 8.5,
+      fontFamily: FONTS.display,
+      letterSpacing: 0.4,
+      marginTop: 4,
+    },
+    claimedTxt: {
+      color: c.inkDim,
+      fontSize: 8.5,
+      fontFamily: FONTS.display,
+      letterSpacing: 0.4,
+      marginTop: 4,
+    },
+    lockedTxt: { color: c.inkDim, fontSize: 10,
+      fontFamily: FONTS.display, fontWeight: '800', marginTop: 4 },
+    // --- Login calendar ---
+    loginBox: {
+      backgroundColor: c.hull,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      borderRadius: 14,
+      padding: 12,
+      marginTop: 8,
+    },
+    loginTitle: { color: c.ink, fontSize: 13,
+      fontFamily: FONTS.display, fontWeight: '900', letterSpacing: 1.6 },
+    loginSub: { color: c.inkDim, fontSize: 11, marginTop: 2, marginBottom: 9 },
+    loginGrid: { flexDirection: 'row', gap: 4, justifyContent: 'space-between' },
+    loginCell: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 6,
+      borderRadius: 8,
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      backgroundColor: 'rgba(0,0,0,0.25)',
+    },
+    loginCellPast: { opacity: 0.45 },
+    loginCellToday: { borderColor: PALETTE.gold, backgroundColor: 'rgba(255,201,60,0.10)' },
+    loginDay: { color: c.inkDim, fontSize: 9, fontWeight: '900' },
+    loginDayToday: { color: PALETTE.gold },
+    loginAmt: { color: COIN_GOLD, fontSize: 10.5, fontWeight: '900', marginTop: 1 },
+    loginBtn: {
+      marginTop: 10,
+      paddingVertical: 10,
+      borderRadius: 11,
+      backgroundColor: PALETTE.gold,
+      alignItems: 'center',
+    },
+    loginBtnDone: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: c.edge },
+    loginBtnTxt: { color: '#221703', fontSize: 12, fontWeight: '900', letterSpacing: 1.4 },
+    loginBtnTxtDone: { color: c.inkDim },
+  });

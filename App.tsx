@@ -9,6 +9,7 @@ import { QuestsScreen } from './src/screens/Quests';
 import LoadingScreen from './src/screens/LoadingScreen';
 import { AmbientParallax } from './src/components/Parallax';
 import { RunBoundary } from './src/components/RunBoundary';
+import { ThemeProvider } from './src/components/Theme';
 import {
   loadSave,
   writeSave,
@@ -36,6 +37,7 @@ import { FONT_MAP } from './src/game/type';
 import { preloadAssets } from './src/game/preload';
 import { initSounds } from './src/game/sounds';
 import { GamePhase, GameState, RunResult } from './src/game/types';
+import { chromeFor } from './src/game/theme';
 import { PALETTE, AVATARS, BACKGROUNDS, DECODE_GRACE_MS, MIN_LOADING_MS, FONT_GRACE_MS } from './src/game/constants';
 
 // TEMP dev switch — lets you browse/equip every ship and background for free
@@ -358,6 +360,9 @@ export default function App() {
   const selectedAvatar = AVATARS.find((a) => a.id === save.selectedAvatar) ?? AVATARS[0];
   const avatarImage = selectedAvatar.image;
   const selectedBackground = BACKGROUNDS.find((b) => b.id === save.selectedBackground) ?? BACKGROUNDS[0];
+  // The shell borrows the equipped sky's hue. Read directly rather than
+  // through the hook: App is what PROVIDES the context, so it sits outside it.
+  const chrome = chromeFor(selectedBackground.id);
   // The equipped hull's permanent upgrades, flattened to the numbers the game
   // loop reads. Recomputed only when the ship or its levels actually change,
   // so GameScreen's `shipStats` prop stays referentially stable across renders
@@ -383,92 +388,98 @@ export default function App() {
   }
 
   return (
-    <View style={styles.root}>
-      <StatusBar style="light" />
-      {/* The player's own sky, drifting behind every shell. Mounted OUTSIDE the
-          phase switch so it survives navigation without restarting its drift. */}
-      {phase !== 'playing' && (
-        <AmbientParallax key={selectedBackground.id} set={selectedBackground.set} />
-      )}
-      {phase === 'menu' && (
-        <MenuScreen
-          save={shopSave}
-          rewardsWaiting={rewardsWaiting}
-          onStart={startGame}
-          onShop={() => setPhase('shop')}
-          onHangar={() => setPhase('hangar')}
-          onStats={() => setPhase('stats')}
-          onQuests={() => setPhase('quests')}
-        />
-      )}
-      {phase === 'playing' && (
-        // A run that fails must never cost more than the run — see RunBoundary.
-        // Keyed with the run so a fresh LIFT OFF always gets a clean boundary
-        // rather than inheriting the failed state of the previous attempt.
-        <RunBoundary
-          key={`boundary-${runId}`}
-          onDiscardRun={discardRun}
-          onHome={() => setPhase('menu')}
-        >
-          <GameScreen
-            key={runId}
-            best={save.best}
-            avatarImage={avatarImage}
-            avatarShot={selectedAvatar.shot}
-            avatarSpecial={selectedAvatar.special}
-            shipStats={shipStats}
-            background={selectedBackground.set}
-            resume={pausedRun}
-            startPaused={!!pausedRun}
-            onGameOver={handleGameOver}
-            onPersist={persistRun}
-            onClearRun={discardRun}
-            onHome={() => setPhase('menu')}
+    <ThemeProvider backgroundId={selectedBackground.id}>
+      <View style={[styles.root, { backgroundColor: chrome.void }]}>
+        <StatusBar style="light" />
+        {/* The player's own sky, drifting behind every shell. Mounted OUTSIDE the
+            phase switch so it survives navigation without restarting its drift. */}
+        {phase !== 'playing' && (
+          <AmbientParallax key={selectedBackground.id} set={selectedBackground.set} />
+        )}
+        {phase === 'menu' && (
+          <MenuScreen
+            save={shopSave}
+            rewardsWaiting={rewardsWaiting}
+            onStart={startGame}
+            onShop={() => setPhase('shop')}
+            onHangar={() => setPhase('hangar')}
+            onStats={() => setPhase('stats')}
+            onQuests={() => setPhase('quests')}
           />
-        </RunBoundary>
-      )}
-      {phase === 'gameover' && (
-        <GameOverScreen
-          result={result}
-          best={save.best}
-          bestScore={save.stats.bestScore}
-          isNewBest={isNewBest}
-          onRestart={startGame}
-          onMenu={() => setPhase('menu')}
-        />
-      )}
-      {phase === 'shop' && (
-        <ShopScreen
-          save={shopSave}
-          onBuyAvatar={buyAvatar}
-          onSelectAvatar={selectAvatar}
-          onBuyBackground={buyBackground}
-          onSelectBackground={selectBackground}
-          onBack={() => setPhase('menu')}
-        />
-      )}
-      {phase === 'hangar' && (
-        <HangarScreen
-          save={shopSave}
-          shipStats={shipStats}
-          onBuyUpgrade={buyUpgrade}
-          onSelectAvatar={selectAvatar}
-          onBack={() => setPhase('menu')}
-        />
-      )}
-      {phase === 'stats' && <StatsScreen save={save} onBack={() => setPhase('menu')} />}
-      {phase === 'quests' && (
-        <QuestsScreen
-          save={save}
-          onClaim={claimQuestReward}
-          onClaimLogin={claimDailyLogin}
-          onBack={() => setPhase('menu')}
-        />
-      )}
-    </View>
+        )}
+        {phase === 'playing' && (
+          // A run that fails must never cost more than the run — see RunBoundary.
+          // Keyed with the run so a fresh LIFT OFF always gets a clean boundary
+          // rather than inheriting the failed state of the previous attempt.
+          <RunBoundary
+            key={`boundary-${runId}`}
+            onDiscardRun={discardRun}
+            onHome={() => setPhase('menu')}
+          >
+            <GameScreen
+              key={runId}
+              best={save.best}
+              avatarImage={avatarImage}
+              avatarShot={selectedAvatar.shot}
+              avatarSpecial={selectedAvatar.special}
+              shipStats={shipStats}
+              background={selectedBackground.set}
+              backgroundId={selectedBackground.id}
+              resume={pausedRun}
+              startPaused={!!pausedRun}
+              onGameOver={handleGameOver}
+              onPersist={persistRun}
+              onClearRun={discardRun}
+              onHome={() => setPhase('menu')}
+            />
+          </RunBoundary>
+        )}
+        {phase === 'gameover' && (
+          <GameOverScreen
+            result={result}
+            best={save.best}
+            bestScore={save.stats.bestScore}
+            isNewBest={isNewBest}
+            onRestart={startGame}
+            onMenu={() => setPhase('menu')}
+          />
+        )}
+        {phase === 'shop' && (
+          <ShopScreen
+            save={shopSave}
+            onBuyAvatar={buyAvatar}
+            onSelectAvatar={selectAvatar}
+            onBuyBackground={buyBackground}
+            onSelectBackground={selectBackground}
+            onBack={() => setPhase('menu')}
+          />
+        )}
+        {phase === 'hangar' && (
+          <HangarScreen
+            save={shopSave}
+            shipStats={shipStats}
+            onBuyUpgrade={buyUpgrade}
+            onSelectAvatar={selectAvatar}
+            onBack={() => setPhase('menu')}
+          />
+        )}
+        {phase === 'stats' && <StatsScreen save={save} onBack={() => setPhase('menu')} />}
+        {phase === 'quests' && (
+          <QuestsScreen
+            save={save}
+            onClaim={claimQuestReward}
+            onClaimLogin={claimDailyLogin}
+            onBack={() => setPhase('menu')}
+          />
+        )}
+      </View>
+    </ThemeProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  // The shipped ground. The main shell overrides it with the equipped sky's
+  // hue; the pre-boot branch keeps this one on purpose, so the loading screen
+  // looks the same under every theme instead of flashing hue once the save lands.
   root: { flex: 1, backgroundColor: PALETTE.void },
 });

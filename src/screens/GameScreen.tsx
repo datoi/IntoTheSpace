@@ -8,6 +8,8 @@ import { ParallaxBackground, layerPeriod } from '../components/Parallax';
 import { FONTS, TYPE } from '../game/type';
 import Icon from '../components/Icon';
 import { LowHullPulse, useReduceMotion } from '../components/Motion';
+import { useThemedStyles } from '../components/Theme';
+import { Chrome } from '../game/theme';
 import {
   FloatTextView,
   HUD,
@@ -18,7 +20,8 @@ import {
   boonChipKey,
 } from '../components/Effects';
 import { Card, Bullet, EnemyBullet, GunKind, SpecialKind, GameState, RunResult } from '../game/types';
-import { play, playPop, playKill, playShot, playGraze } from '../game/sounds';
+import { play, playKill, playShot, playGraze, playPickup, playSystem } from '../game/sounds';
+import { startMusic, pauseMusic, stopMusic } from '../game/music';
 // Every haptic in the run goes through this budget rather than at the motor
 // directly — see haptics.ts for why a graze storm was drowning out damage.
 import { haptic, hapticFailure, HapticWeight } from '../game/haptics';
@@ -284,6 +287,7 @@ interface Props {
    */
   shipStats: ShipStats;
   background: BgSet; // the one environment shown for the whole run
+  backgroundId: string; // which sky it is — picks the music pair (see music.ts)
   resume?: GameState | null; // restore an in-progress run instead of starting fresh
   startPaused?: boolean; // resumed runs open on the pause screen
   onGameOver: (result: RunResult) => void;
@@ -577,6 +581,7 @@ export default function GameScreen({
   avatarSpecial,
   shipStats,
   background,
+  backgroundId,
   resume,
   startPaused,
   onGameOver,
@@ -713,6 +718,23 @@ export default function GameScreen({
     onPersist(g.current);
     onHome();
   }, [onPersist, onHome]);
+
+  // The run's soundtrack: the pair belonging to the equipped sky.
+  //
+  // Driven by `paused` rather than by the loop, so it follows every route into
+  // a stopped run for free — the pause button, going home, and the AppState
+  // handler below, which pauses on backgrounding. A player who alt-tabs should
+  // not still be hearing the game.
+  //
+  // Released on unmount rather than merely paused: a finished run is one whose
+  // music will never resume, and holding two multi-megabyte streams alive for
+  // every run of a session is how a low-end device runs out of audio memory.
+  useEffect(() => {
+    if (paused) pauseMusic();
+    else startMusic(backgroundId);
+  }, [paused, backgroundId]);
+
+  useEffect(() => stopMusic, []);
 
   // Closing / backgrounding the app pauses and snapshots the run so it can be
   // resumed on next launch.
@@ -957,10 +979,10 @@ export default function GameScreen({
       chargeAnim.current.setValue(s.specialCharge);
       // Announce the moment it arms, once — it's the cue to make a decision.
       if (before < 1 && s.specialCharge >= 1) {
-        play('ding', 0.5);
+        playSystem('armed');
         float(s.avatarX, s.avatarY - 74, `${SPECIALS[avatarSpecial].name} READY`, PALETTE.gold);
       } else if (before < ENERGY_OVERCHARGE && s.specialCharge >= ENERGY_OVERCHARGE) {
-        play('ding', 0.75);
+        playSystem('overcharged');
         float(s.avatarX, s.avatarY - 74, 'OVERCHARGED', OVERCHARGE_EDGE);
       }
     };
@@ -1006,7 +1028,7 @@ export default function GameScreen({
       const callout = calloutFor(before, mult);
       if (callout !== undefined) {
         float(SCREEN.W / 2, SCREEN.H * 0.38, `CHAIN ×${callout}`, CHAIN_HUD_HOT);
-        play('ding', 0.65);
+        playSystem('chain');
       }
       float(
         x,
@@ -1038,7 +1060,7 @@ export default function GameScreen({
         // a missed collision, and the player stops trusting the shield.
         const bulwark = s.bulwarkTime > 0;
         s.shake = Math.max(s.shake, SHAKE_ABSORB);
-        play('ding', 0.55);
+        playSystem('block');
         haptic(HapticWeight.Medium);
         const tint = bulwark ? BULWARK_COLOR : SHIELD_COLOR;
         burst(s.avatarX, s.avatarY, tint, 10);
@@ -1320,7 +1342,7 @@ export default function GameScreen({
       const s = g.current;
       const def = BOONS[kind];
       s.pickupsCollected += 1;
-      play('ding', 0.9);
+      playPickup(kind);
       haptic(HapticWeight.Medium, Haptics.ImpactFeedbackStyle.Medium);
       burst(s.avatarX, s.avatarY, def.color, 14);
       float(s.avatarX, s.avatarY - 44, def.name.toUpperCase(), def.color);
@@ -1382,7 +1404,7 @@ export default function GameScreen({
       // than simply appearing.
       hitStop(HITSTOP_BOSS_PHASE, true);
       play('whoosh', 1);
-      play('ding', over ? 1 : 0.85);
+      playSystem(over ? 'specialOver' : 'special');
       haptic(HapticWeight.Heavy, Haptics.ImpactFeedbackStyle.Heavy);
       float(
         s.avatarX,
@@ -1608,9 +1630,9 @@ export default function GameScreen({
             if (earned.length) {
               // Still paid, just no longer announced: the banner was three gold
               // slabs across the middle of the play field at the exact moment a
-              // new formation arrives. The 'ding' is what tells you now.
+              // new formation arrives. The wave-clear chime is what tells you now.
               s.score += ribbonTotal(earned);
-              play('ding', 0.9);
+              playSystem('waveClear');
               haptic(HapticWeight.Medium, Haptics.ImpactFeedbackStyle.Medium);
             }
             if (s.waveHits === 0) {
@@ -1768,7 +1790,7 @@ export default function GameScreen({
             s.hearts = Math.min(s.maxHearts, s.hearts + 1);
             s.heartsCollected += 1;
             s.pickupsCollected += 1;
-            playPop(4);
+            playPickup('heart');
             haptic(HapticWeight.Light);
             burst(s.avatarX, s.avatarY, PALETTE.plasma, 12);
             float(s.avatarX, s.avatarY - 40, '+1 HULL', PALETTE.plasma);
@@ -1776,7 +1798,7 @@ export default function GameScreen({
             const value = coinValue(s.boons);
             s.coins += value;
             s.pickupsCollected += 1;
-            playPop(2);
+            playPickup('coin');
             haptic(HapticWeight.Light);
             burst(s.avatarX, s.avatarY, COIN_GOLD, 10);
             float(s.avatarX, s.avatarY - 40, `+${value} COIN${value > 1 ? 'S' : ''}`, COIN_GOLD);
@@ -1799,7 +1821,7 @@ export default function GameScreen({
               s.gunLevel = 1;
             }
             s.gunTime = GUN_TIME;
-            play('ding', 1);
+            playPickup('gift');
             haptic(HapticWeight.Medium, Haptics.ImpactFeedbackStyle.Medium);
             burst(s.avatarX, s.avatarY, PALETTE.gold, 14);
             const lbl = s.gunLevel > 1 ? `${GUN_LABEL[s.gun]} ×${s.gunLevel}` : GUN_LABEL[s.gun];
@@ -1990,7 +2012,7 @@ export default function GameScreen({
               speed: BULWARK_REFLECT_SPEED,
             });
             burst(b.x, b.y, BULWARK_COLOR, 5);
-            play('ding', 0.28);
+            playSystem('reflect');
             continue; // consumed by the shell — no hit, no heart lost
           }
           burst(b.x, b.y, b.color, 8);
@@ -2928,28 +2950,12 @@ export default function GameScreen({
         </>
       )}
       {paused && (
-        <View style={styles.pauseOverlay}>
-          <Text style={styles.pauseTitle}>PAUSED</Text>
-          <Text style={styles.pauseDist}>{Math.round(s.alt)}m</Text>
-          <Pressable
-            onPress={doContinue}
-            style={({ pressed }) => [styles.pausePrimary, pressed && styles.pausePressed]}
-          >
-            <Text style={styles.pausePrimaryTxt}>CONTINUE</Text>
-          </Pressable>
-          <Pressable
-            onPress={doNewGame}
-            style={({ pressed }) => [styles.pauseSecondary, pressed && styles.pausePressed]}
-          >
-            <Text style={styles.pauseSecondaryTxt}>NEW GAME</Text>
-          </Pressable>
-          <Pressable
-            onPress={doHome}
-            style={({ pressed }) => [styles.pauseSecondary, pressed && styles.pausePressed]}
-          >
-            <Text style={styles.pauseSecondaryTxt}>RETURN TO HOME</Text>
-          </Pressable>
-        </View>
+        <PauseMenu
+          alt={s.alt}
+          onContinue={doContinue}
+          onNewGame={doNewGame}
+          onHome={doHome}
+        />
       )}
     </View>
   );
@@ -3256,58 +3262,112 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.display,
     letterSpacing: 1,
   },
-  pauseOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(6,8,16,0.82)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 40,
-  },
-  pauseTitle: {
-    ...TYPE.displayL,
-    color: PALETTE.ink,
-    fontSize: 40,
-  },
-  pauseDist: {
-    color: PALETTE.inkDim,
-    fontSize: 16,
-    fontFamily: FONTS.display,
-    letterSpacing: 1,
-    marginTop: 6,
-    marginBottom: 34,
-  },
-  pausePrimary: {
-    backgroundColor: PALETTE.plasma,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  pausePrimaryTxt: {
-    color: '#04121A',
-    fontSize: 16,
-    fontFamily: FONTS.display,
-    letterSpacing: 2,
-  },
-  pauseSecondary: {
-    paddingVertical: 15,
-    borderRadius: 14,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.22)',
-    marginBottom: 12,
-  },
-  pauseSecondaryTxt: {
-    color: PALETTE.ink,
-    fontSize: 14,
-    fontFamily: FONTS.display,
-    letterSpacing: 2,
-  },
-  pausePressed: { opacity: 0.7 },
+});
+
+/**
+ * The pause menu.
+ *
+ * Its own component with its own themed stylesheet rather than a hook inside
+ * GameScreen: GameScreen's render is the hot path, and this way the chrome
+ * context is only subscribed to while the overlay is actually on screen.
+ *
+ * Everything here follows the equipped sky - the scrim, the two ink weights,
+ * CONTINUE's fill and its label. The run itself, still visible through the
+ * scrim, does not: the ship and the enemies keep the colours they had a frame
+ * before the player hit pause.
+ */
+const makePauseStyles = (c: Chrome) =>
+  StyleSheet.create({
+    overlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: c.scrim,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 40,
+    },
+    title: {
+      ...TYPE.displayL,
+      color: c.ink,
+      fontSize: 40,
+    },
+    dist: {
+      color: c.inkDim,
+      fontSize: 16,
+      fontFamily: FONTS.display,
+      letterSpacing: 1,
+      marginTop: 6,
+      marginBottom: 34,
+    },
+    primary: {
+      backgroundColor: c.accent,
+      paddingVertical: 16,
+      borderRadius: 14,
+      alignSelf: 'stretch',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    primaryTxt: {
+      color: c.accentInk,
+      fontSize: 16,
+      fontFamily: FONTS.display,
+      letterSpacing: 2,
+    },
+    secondary: {
+      paddingVertical: 15,
+      borderRadius: 14,
+      alignSelf: 'stretch',
+      alignItems: 'center',
+      borderWidth: 1.5,
+      borderColor: c.edge,
+      marginBottom: 12,
+    },
+    secondaryTxt: {
+      color: c.ink,
+      fontSize: 14,
+      fontFamily: FONTS.display,
+      letterSpacing: 2,
+    },
+    pressed: { opacity: 0.7 },
+  });
+
+const PauseMenu = React.memo(function PauseMenu({
+  alt,
+  onContinue,
+  onNewGame,
+  onHome,
+}: {
+  alt: number;
+  onContinue: () => void;
+  onNewGame: () => void;
+  onHome: () => void;
+}) {
+  const styles = useThemedStyles(makePauseStyles);
+  return (
+    <View style={styles.overlay} testID="pause-menu">
+      <Text style={styles.title}>PAUSED</Text>
+      <Text style={styles.dist}>{Math.round(alt)}m</Text>
+      <Pressable
+        onPress={onContinue}
+        style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
+      >
+        <Text style={styles.primaryTxt}>CONTINUE</Text>
+      </Pressable>
+      <Pressable
+        onPress={onNewGame}
+        style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
+      >
+        <Text style={styles.secondaryTxt}>NEW GAME</Text>
+      </Pressable>
+      <Pressable
+        onPress={onHome}
+        style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
+      >
+        <Text style={styles.secondaryTxt}>RETURN TO HOME</Text>
+      </Pressable>
+    </View>
+  );
 });

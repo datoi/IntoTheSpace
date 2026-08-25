@@ -3,6 +3,8 @@ import { render, screen, fireEvent, act } from '@testing-library/react-native';
 import GameScreen from '../GameScreen';
 import { leftOf, topOf } from '../../test-utils/style';
 import { freshRunState } from '../../game/runstate';
+import { ThemeProvider } from '../../components/Theme';
+import { chromeFor, DEFAULT_CHROME } from '../../game/theme';
 import { BASE_SHIP_STATS } from '../../game/upgrades';
 import { GameState, Card, EnemyBullet } from '../../game/types';
 import {
@@ -96,12 +98,22 @@ const card = (over: Partial<Card>): Card => ({
   ...over,
 });
 
-const renderGame = async (resume?: GameState, extraProps: Record<string, unknown> = {}) => {
+const flattenStyle = (style: unknown): Record<string, string> =>
+  Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
+
+const renderGame = async (
+  resume?: GameState,
+  extraProps: Record<string, unknown> = {},
+  // The chrome provider, for the tests that care what colour the shell is.
+  // Left off by default so every other test exercises the shipped chrome.
+  wrap: (node: React.ReactElement) => React.ReactElement = (node) => node
+) => {
   const onGameOver = jest.fn();
   const onPersist = jest.fn();
   const onClearRun = jest.fn();
   const onHome = jest.fn();
   await render(
+    wrap(
     <GameScreen
       best={0}
       avatarImage={AVATARS[0].image}
@@ -109,6 +121,7 @@ const renderGame = async (resume?: GameState, extraProps: Record<string, unknown
       avatarSpecial={AVATARS[0].special}
       shipStats={BASE_SHIP_STATS}
       background={BACKGROUNDS[0].set}
+      backgroundId={BACKGROUNDS[0].id}
       resume={resume ?? null}
       onGameOver={onGameOver}
       onPersist={onPersist}
@@ -116,6 +129,7 @@ const renderGame = async (resume?: GameState, extraProps: Record<string, unknown
       onHome={onHome}
       {...extraProps}
     />
+    )
   );
   return { onGameOver, onPersist, onClearRun, onHome };
 };
@@ -855,6 +869,30 @@ describe('GameScreen — game over', () => {
 });
 
 describe('GameScreen — pause / resume / navigation', () => {
+  it('wears the equipped sky, not the shipped chrome', async () => {
+    // The pause menu sits INSIDE the run, so it was the one piece of shell the
+    // first pass at theming left behind. Ember is the clearest tell: its accent
+    // is warm where every other sky's is blue.
+    await renderGame(quietState({ alt: 500 }), { startPaused: true }, (node) => (
+      <ThemeProvider backgroundId="ember">{node}</ThemeProvider>
+    ));
+    const ember = chromeFor('ember');
+    expect(flattenStyle(screen.getByTestId('pause-menu').props.style).backgroundColor).toBe(
+      ember.scrim
+    );
+    // CONTINUE's dark label, and the title, both follow the sky.
+    expect(flattenStyle(screen.getByText('CONTINUE').props.style).color).toBe(ember.accentInk);
+    expect(flattenStyle(screen.getByText('PAUSED').props.style).color).toBe(ember.ink);
+  });
+
+  it('keeps the shipped chrome when no sky is provided', async () => {
+    // Rendered bare, as every other test in this file does it.
+    await renderGame(quietState({ alt: 500 }), { startPaused: true });
+    expect(flattenStyle(screen.getByTestId('pause-menu').props.style).backgroundColor).toBe(
+      DEFAULT_CHROME.scrim
+    );
+  });
+
   it('opens paused when resuming a snapshotted run', async () => {
     await renderGame(quietState({ alt: 500 }), { startPaused: true });
     expect(screen.getByText('PAUSED')).toBeTruthy();
