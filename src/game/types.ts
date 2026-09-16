@@ -319,7 +319,15 @@ export interface GameState {
   hitStop: number;
 }
 
-export type GamePhase = 'menu' | 'playing' | 'gameover' | 'shop' | 'hangar' | 'stats' | 'quests';
+export type GamePhase =
+  | 'menu'
+  | 'playing'
+  | 'gameover'
+  | 'shop'
+  | 'hangar'
+  | 'stats'
+  | 'quests'
+  | 'settings';
 
 export interface RunResult {
   coins: number; // collected this run

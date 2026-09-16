@@ -2,8 +2,9 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 /**
- * Guards the shipped generated audio — `scripts/make-shot-sfx.mjs` and
- * `scripts/make-pickup-sfx.mjs`.
+ * Guards the shipped generated audio — `scripts/make-shot-sfx.mjs`,
+ * `scripts/make-pickup-sfx.mjs`, `scripts/make-system-sfx.mjs` and
+ * `scripts/make-ui-sfx.mjs`.
  *
  * The gun was silent once already (playShot() borrowed `whoosh` at volume
  * 0.1), and both generators now carry a `ringMix` lever that costs RMS at a
@@ -50,6 +51,13 @@ const VOICES: Record<string, Voice> = {
   'sys_chain.wav': { rms: 0.13, maxSec: 0.15 },
   'sys_special.wav': { rms: 0.195, maxSec: 0.35 },
   'sys_wave.wav': { rms: 0.17, maxSec: 0.35 },
+  // Interface. The tap is the quietest voice on any board and the shortest:
+  // it plays on every press of every screen, so its budget is set by
+  // repetition rather than by importance. Confirm and deny are one-per-
+  // transaction and can afford to be heard.
+  'ui_tap.wav': { rms: 0.098, maxSec: 0.07 },
+  'ui_confirm.wav': { rms: 0.142, maxSec: 0.2 },
+  'ui_deny.wav': { rms: 0.128, maxSec: 0.2 },
 };
 
 interface Wav {

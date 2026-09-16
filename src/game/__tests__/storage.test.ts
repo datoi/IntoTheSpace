@@ -111,6 +111,37 @@ describe('loadSave', () => {
   });
 });
 
+describe('audio settings', () => {
+  it('round-trips a changed mix', async () => {
+    await writeSave({ ...sampleSave, audio: { ui: 0, sfx: 0.5, music: 0.25 } });
+    const save = await loadSave();
+    expect(save.audio).toEqual({ ui: 0, sfx: 0.5, music: 0.25 });
+  });
+
+  it('reads a save written before the mixer existed as the shipped mix', async () => {
+    // The field is purely additive, which is why this needed no SAVE_VERSION
+    // bump — but "additive" is only true if the missing key reads as UNITY.
+    // Read as 0 it would silence the game for every existing player on
+    // update, which is the worst possible interpretation of "not configured".
+    const legacy: Record<string, unknown> = { ...sampleSave };
+    delete legacy.audio;
+    await AsyncStorage.setItem(SAVE_KEY, JSON.stringify(legacy));
+    const save = await loadSave();
+    expect(save.audio).toEqual({ ui: 1, sfx: 1, music: 1 });
+  });
+
+  it('repairs a corrupt mix rather than inheriting a NaN', async () => {
+    // A NaN volume silences a channel forever with no visible cause: the
+    // slider reads 'NaN%' and no arithmetic on it recovers.
+    await AsyncStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({ ...sampleSave, audio: { ui: null, sfx: 4, music: 'loud' } })
+    );
+    const save = await loadSave();
+    expect(save.audio).toEqual({ ui: 1, sfx: 1, music: 1 });
+  });
+});
+
 describe('writeSave', () => {
   it('persists as JSON under the save key', async () => {
     await writeSave(sampleSave);

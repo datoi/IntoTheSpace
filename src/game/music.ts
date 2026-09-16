@@ -1,4 +1,5 @@
 import { createAudioPlayer, AudioPlayer } from 'expo-audio';
+import { channelVolume, onAudioChange } from './mixer';
 
 /**
  * Background music — one pair of tracks per sky.
@@ -56,14 +57,40 @@ export const BG_MUSIC: Record<string, [number, number]> = {
  * The sound board carries the information — kills, pickups, saves — and music
  * is the floor it stands on. At parity the two fight, and the loser is always
  * the one the player actually needs to hear.
+ *
+ * This is the AUTHORED level and stays the source of truth for the balance
+ * between music and effects; the player's `music` channel only scales it, so
+ * turning the music down never changes what it sits under.
  */
-const MUSIC_VOLUME = 0.35;
+const MUSIC_BASE = 0.35;
+
+/** The authored level after the player's channel gain. */
+const musicVolume = (): number => MUSIC_BASE * channelVolume('music');
 
 /** The currently mounted pair, and which half of it is playing. */
 let players: AudioPlayer[] = [];
 let index = 0;
 let currentBg: string | null = null;
 let subscription: { remove(): void } | null = null;
+
+/**
+ * Re-level the track that is ALREADY PLAYING when the player moves the slider.
+ *
+ * Without this the mixer would only take effect at the next track handoff —
+ * up to half a minute later — and a slider that appears to do nothing reads as
+ * a broken slider, not as a delayed one. Subscribed at module scope because
+ * there is exactly one music system for the life of the app; there is nothing
+ * to unsubscribe from and no lifecycle to hang it off.
+ */
+onAudioChange(() => {
+  const p = players[index];
+  if (!p) return;
+  try {
+    p.volume = musicVolume();
+  } catch {
+    // A player mid-teardown is not worth a crash.
+  }
+});
 
 function releaseAll(): void {
   subscription?.remove();
@@ -104,7 +131,7 @@ function playCurrent(): void {
     subscription = null;
   }
   try {
-    p.volume = MUSIC_VOLUME;
+    p.volume = musicVolume();
     p.seekTo(0);
     p.play();
   } catch {

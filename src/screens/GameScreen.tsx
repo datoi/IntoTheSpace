@@ -8,6 +8,7 @@ import { ParallaxBackground, layerPeriod } from '../components/Parallax';
 import { FONTS, TYPE } from '../game/type';
 import Icon from '../components/Icon';
 import { LowHullPulse, useReduceMotion } from '../components/Motion';
+import { AudioMixerPanel } from '../components/AudioMixer';
 import { useThemedStyles } from '../components/Theme';
 import { Chrome } from '../game/theme';
 import {
@@ -20,7 +21,7 @@ import {
   boonChipKey,
 } from '../components/Effects';
 import { Card, Bullet, EnemyBullet, GunKind, SpecialKind, GameState, RunResult } from '../game/types';
-import { play, playKill, playShot, playGraze, playPickup, playSystem } from '../game/sounds';
+import { play, playKill, playShot, playGraze, playPickup, playSystem, playUi } from '../game/sounds';
 import { startMusic, pauseMusic, stopMusic } from '../game/music';
 // Every haptic in the run goes through this budget rather than at the motor
 // directly — see haptics.ts for why a graze storm was drowning out damage.
@@ -2952,6 +2953,7 @@ export default function GameScreen({
       {paused && (
         <PauseMenu
           alt={s.alt}
+          backgroundId={backgroundId}
           onContinue={doContinue}
           onNewGame={doNewGame}
           onHome={doHome}
@@ -3332,41 +3334,112 @@ const makePauseStyles = (c: Chrome) =>
       letterSpacing: 2,
     },
     pressed: { opacity: 0.7 },
+    // The mixer's own header, smaller than PAUSED: it is a sub-screen of the
+    // pause menu, not a peer of it.
+    panelTitle: {
+      ...TYPE.label,
+      color: c.ink,
+      fontSize: 16,
+      letterSpacing: 3,
+      marginBottom: 22,
+    },
+    panelBack: {
+      marginTop: 22,
+    },
+    audioLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 8,
+      marginTop: 4,
+    },
+    audioLinkTxt: {
+      ...TYPE.micro,
+      color: c.inkDim,
+    },
   });
 
 const PauseMenu = React.memo(function PauseMenu({
   alt,
+  backgroundId,
   onContinue,
   onNewGame,
   onHome,
 }: {
   alt: number;
+  backgroundId: string;
   onContinue: () => void;
   onNewGame: () => void;
   onHome: () => void;
 }) {
   const styles = useThemedStyles(makePauseStyles);
+  // The mixer lives BEHIND a press rather than always-on, because the pause
+  // screen's job is to get the player back into the run: three sliders above
+  // CONTINUE would put the least-used control in the most valuable position.
+  // But it has to be HERE, because pausing is when a player notices the music
+  // is too loud — sending them out to the menu to fix it costs them the run.
+  const [mixing, setMixing] = useState(false);
+
+  if (mixing) {
+    return (
+      <View style={styles.overlay} testID="pause-menu">
+        <Text style={styles.panelTitle}>AUDIO</Text>
+        <AudioMixerPanel previewBg={backgroundId} compact />
+        <Pressable
+          onPress={() => {
+            playUi('back');
+            setMixing(false);
+          }}
+          style={({ pressed }) => [styles.secondary, styles.panelBack, pressed && styles.pressed]}
+        >
+          <Text style={styles.secondaryTxt}>DONE</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.overlay} testID="pause-menu">
       <Text style={styles.title}>PAUSED</Text>
       <Text style={styles.dist}>{Math.round(alt)}m</Text>
       <Pressable
-        onPress={onContinue}
+        onPress={() => {
+          playUi('tap');
+          onContinue();
+        }}
         style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
       >
         <Text style={styles.primaryTxt}>CONTINUE</Text>
       </Pressable>
       <Pressable
-        onPress={onNewGame}
+        onPress={() => {
+          playUi('tap');
+          onNewGame();
+        }}
         style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
       >
         <Text style={styles.secondaryTxt}>NEW GAME</Text>
       </Pressable>
       <Pressable
-        onPress={onHome}
+        onPress={() => {
+          playUi('back');
+          onHome();
+        }}
         style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
       >
         <Text style={styles.secondaryTxt}>RETURN TO HOME</Text>
+      </Pressable>
+      <Pressable
+        testID="pause-audio"
+        onPress={() => {
+          playUi('tap');
+          setMixing(true);
+        }}
+        hitSlop={10}
+        style={({ pressed }) => [styles.audioLink, pressed && styles.pressed]}
+      >
+        <Icon name="sound" size={13} color={PALETTE.inkDim} />
+        <Text style={styles.audioLinkTxt}>AUDIO</Text>
       </Pressable>
     </View>
   );

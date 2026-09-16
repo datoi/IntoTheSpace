@@ -17,7 +17,8 @@ import { FONTS, TYPE } from '../game/type';
 import CoinIcon from '../components/Coin';
 import { useChrome, useThemedStyles } from '../components/Theme';
 import Icon, { IconName } from '../components/Icon';
-import { Button, IconButton } from '../components/Button';
+import { Button, IconButton, useUiPress } from '../components/Button';
+import { playUi } from '../game/sounds';
 import { RollingNumber, useReduceMotion } from '../components/Motion';
 
 // Shop catalogs are shown cheapest-first, so the price climbs as the player
@@ -46,6 +47,7 @@ interface MenuProps {
   onHangar: () => void;
   onStats: () => void;
   onQuests: () => void;
+  onSettings: () => void;
 }
 
 export function MenuScreen({
@@ -56,11 +58,15 @@ export function MenuScreen({
   onHangar,
   onStats,
   onQuests,
+  onSettings,
 }: MenuProps) {
   const styles = useThemedStyles(makeStyles);
   const c = useChrome();
   const avatar = AVATARS.find((a) => a.id === save.selectedAvatar) ?? AVATARS[0];
   const [showGuide, setShowGuide] = useState(false);
+  const pressHull = useUiPress(onShop);
+  const pressGuide = useUiPress(() => setShowGuide(true));
+  const pressSettings = useUiPress(onSettings);
   // A slow bob, so the hull reads as hovering rather than pasted on. Native
   // driver: the menu has no loop, and this must not cost a JS frame.
   const bob = useRef(new Animated.Value(0)).current;
@@ -88,9 +94,25 @@ export function MenuScreen({
             </>
           )}
         </View>
-        <View style={styles.menuWallet}>
-          <CoinIcon size={13} />
-          <Text style={styles.menuCoins}>{save.likes}</Text>
+        <View style={styles.menuTopRight}>
+          <View style={styles.menuWallet}>
+            <CoinIcon size={13} />
+            <Text style={styles.menuCoins}>{save.likes}</Text>
+          </View>
+          {/* Volume lives behind a gear in the top bar rather than as a fifth
+              icon in the rail: the rail is the four places a player GOES, and
+              settings is not a destination in the same sense — it is chrome,
+              and it belongs with the other chrome. */}
+          <Pressable
+            testID="menu-settings"
+            onPress={pressSettings}
+            hitSlop={14}
+            accessibilityRole="button"
+            accessibilityLabel="Audio settings"
+            style={({ pressed }) => [styles.settingsBtn, pressed && styles.pressed]}
+          >
+            <Icon name="settings" size={18} color={c.inkDim} />
+          </Pressable>
         </View>
       </View>
 
@@ -113,7 +135,7 @@ export function MenuScreen({
           LIFT OFF sits immediately beneath it, so widening this one could only
           steal taps from the primary CTA. */}
       <Pressable
-        onPress={onShop}
+        onPress={pressHull}
         testID="menu-hull"
         accessibilityRole="button"
         accessibilityLabel={`${avatar.name} — open the ship shop`}
@@ -156,7 +178,7 @@ export function MenuScreen({
         <IconButton icon="stats" label="STATS" onPress={onStats} />
       </View>
 
-      <Pressable onPress={() => setShowGuide(true)} hitSlop={12} style={styles.guideLink}>
+      <Pressable onPress={pressGuide} hitSlop={12} style={styles.guideLink}>
         <Icon name="info" size={12} color={c.inkDim} />
         <Text style={styles.guideLinkTxt}>PICK-UPS</Text>
       </Pressable>
@@ -392,9 +414,18 @@ function ShopRow({ name, price, owned, selected, affordable, thumb, special, tie
   const styles = useThemedStyles(makeStyles);
   const c = useChrome();
   const locked = !owned && !affordable;
+  // The row already knows what the press will DO, so it can say it — no call
+  // site has to describe its own outcome twice, once to the handler and once
+  // to the sound board. An unaffordable row is the important case: it looks
+  // identical to a purchasable one until you read the price, and the deny is
+  // often the first unambiguous signal that nothing happened.
+  const press = useUiPress(
+    onPress,
+    selected ? 'tap' : owned ? 'select' : affordable ? 'confirm' : 'deny'
+  );
   return (
     <Pressable
-      onPress={onPress}
+      onPress={press}
       style={({ pressed }) => [
         styles.shopItem,
         selected && styles.shopItemSelected,
@@ -457,11 +488,20 @@ export function ShopScreen({
       </View>
 
       <View style={styles.tabs}>
-        <Pressable onPress={() => setTab('ships')} style={[styles.tab, tab === 'ships' && styles.tabActive]}>
+        <Pressable
+          onPress={() => {
+            playUi('select');
+            setTab('ships');
+          }}
+          style={[styles.tab, tab === 'ships' && styles.tabActive]}
+        >
           <Text style={[styles.tabTxt, tab === 'ships' && styles.tabTxtActive]}>SHIPS</Text>
         </Pressable>
         <Pressable
-          onPress={() => setTab('backgrounds')}
+          onPress={() => {
+            playUi('select');
+            setTab('backgrounds');
+          }}
           style={[styles.tab, tab === 'backgrounds' && styles.tabActive]}
         >
           <Text style={[styles.tabTxt, tab === 'backgrounds' && styles.tabTxtActive]}>BACKGROUNDS</Text>
@@ -541,6 +581,16 @@ const makeStyles = (c: Chrome) =>
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'flex-start',
+    },
+    menuTopRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+    },
+    settingsBtn: {
+      // The glyph is 18px; the padding plus hitSlop carries it past the 44px
+      // minimum without drawing a button around it.
+      padding: 3,
     },
     menuBestLabel: {
       ...TYPE.micro,

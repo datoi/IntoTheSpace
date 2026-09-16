@@ -8,15 +8,28 @@
 // padding, so a visually small button (the icon rail) still meets it without
 // being drawn oversized.
 
-import React, { useRef } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { PALETTE } from '../game/constants';
+import { UiEvent, playUi } from '../game/sounds';
 import { Chrome } from '../game/theme';
 import { TYPE } from '../game/type';
 import { useChrome, useThemedStyles } from './Theme';
 import Icon, { IconName } from './Icon';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost';
+
+/**
+ * What a press sounds like, when the caller hasn't said.
+ *
+ * Derived from the ICON rather than asked for at every call site, because the
+ * icon already encodes the direction: a button wearing 'back' or 'close' is
+ * leaving, everything else is going somewhere. That means a screen written
+ * next year sounds right without its author having thought about audio, which
+ * is the only way a rule like this survives.
+ */
+const defaultSound = (icon?: IconName): UiEvent =>
+  icon === 'back' || icon === 'close' ? 'back' : 'tap';
 
 interface Props {
   label: string;
@@ -29,6 +42,13 @@ interface Props {
   badge?: number;
   style?: ViewStyle;
   testID?: string;
+  /**
+   * Override the press sound. Pass 'confirm' for a button that completes a
+   * transaction, 'deny' for one that refuses; `false` silences it entirely,
+   * which is only right where the ACTION itself makes the sound (a purchase
+   * row that plays confirm or deny depending on the balance, say).
+   */
+  sound?: UiEvent | false;
 }
 
 const RADIUS = 10; // one radius, everywhere
@@ -51,6 +71,31 @@ function usePressAnim(disabled: boolean) {
   };
 }
 
+/**
+ * Wrap a press handler so it also SOUNDS.
+ *
+ * Exported because plenty of the app's touch targets are raw Pressables — shop
+ * rows, tabs, the menu's hull pedestal — and those deserve the same voice
+ * without being rebuilt as Buttons.
+ *
+ * Deliberately fired from onPress (release) rather than onPressIn (touch
+ * down), even though touch-down is the more immediate feedback and is what the
+ * scale animation uses. Inside a ScrollView, onPressIn fires the instant a
+ * finger lands — before the scroll responder has had a chance to claim the
+ * gesture — so a press-down click would fire on every attempt to SCROLL the
+ * shop. Visual feedback can afford to be wrong for 100ms and then cancel;
+ * audio cannot take itself back.
+ *
+ * Passing `false` silences the press, for call sites where the action itself
+ * decides the sound (a purchase that either confirms or denies).
+ */
+export function useUiPress(onPress: () => void, sound: UiEvent | false = 'tap'): () => void {
+  return useCallback(() => {
+    if (sound) playUi(sound);
+    onPress();
+  }, [onPress, sound]);
+}
+
 export function Button({
   label,
   onPress,
@@ -60,8 +105,10 @@ export function Button({
   badge,
   style,
   testID,
+  sound,
 }: Props) {
   const { scale, onPressIn, onPressOut } = usePressAnim(disabled);
+  const press = useUiPress(onPress, sound ?? defaultSound(icon));
   const styles = useThemedStyles(makeStyles);
   const c = useChrome();
   const tone = disabled
@@ -76,7 +123,7 @@ export function Button({
     <Animated.View style={[{ transform: [{ scale }] }, style]}>
       <Pressable
         testID={testID}
-        onPress={disabled ? undefined : onPress}
+        onPress={disabled ? undefined : press}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
         disabled={disabled}
@@ -115,21 +162,24 @@ export function IconButton({
   onPress,
   badge,
   testID,
+  sound,
 }: {
   icon: IconName;
   label: string;
   onPress: () => void;
   badge?: number;
   testID?: string;
+  sound?: UiEvent | false;
 }) {
   const { scale, onPressIn, onPressOut } = usePressAnim(false);
+  const press = useUiPress(onPress, sound ?? defaultSound(icon));
   const styles = useThemedStyles(makeStyles);
   const c = useChrome();
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
       <Pressable
         testID={testID}
-        onPress={onPress}
+        onPress={press}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
         hitSlop={10}

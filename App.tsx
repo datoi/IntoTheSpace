@@ -6,6 +6,7 @@ import GameScreen from './src/screens/GameScreen';
 import { MenuScreen, GameOverScreen, ShopScreen } from './src/screens/Screens';
 import { HangarScreen, StatsScreen } from './src/screens/Progress';
 import { QuestsScreen } from './src/screens/Quests';
+import { SettingsScreen } from './src/screens/Settings';
 import LoadingScreen from './src/screens/LoadingScreen';
 import { AmbientParallax } from './src/components/Parallax';
 import { RunBoundary } from './src/components/RunBoundary';
@@ -36,6 +37,7 @@ import {
 import { FONT_MAP } from './src/game/type';
 import { preloadAssets } from './src/game/preload';
 import { initSounds } from './src/game/sounds';
+import { AudioSettings, audioSettings, onAudioChange, setAudioSettings } from './src/game/mixer';
 import { GamePhase, GameState, RunResult } from './src/game/types';
 import { chromeFor } from './src/game/theme';
 import { PALETTE, AVATARS, BACKGROUNDS, DECODE_GRACE_MS, MIN_LOADING_MS, FONT_GRACE_MS } from './src/game/constants';
@@ -47,6 +49,15 @@ import { PALETTE, AVATARS, BACKGROUNDS, DECODE_GRACE_MS, MIN_LOADING_MS, FONT_GR
 // production release build (__DEV__ is false there). Set to false / delete when
 // you're done checking.
 const DEV_UNLOCK_ALL = __DEV__ && process.env.NODE_ENV !== 'test';
+
+/**
+ * How long after the last slider movement the mix is written to disk.
+ *
+ * Long enough that a whole drag gesture collapses into one write, short enough
+ * that a player who changes a volume and immediately kills the app still keeps
+ * it (the unmount path flushes anyway — this is about the common case).
+ */
+const AUDIO_WRITE_DEBOUNCE_MS = 400;
 
 export default function App() {
   const [phase, setPhase] = useState<GamePhase>('menu');
@@ -109,6 +120,11 @@ export default function App() {
       // The ref has to move with the state — it is what every handler reads.
       saveRef.current = loaded;
       setSave(loaded);
+      // Hand the stored volumes to the mixer before anything can play. The
+      // mixer is the runtime source of truth (the game loop and music module
+      // read it directly, outside React), and the save is only its durable
+      // copy — so this is the one direction the data flows at boot.
+      setAudioSettings(loaded.audio);
       setPausedRun(run);
       await preloadAssets((done, total) => {
         if (alive) setProgress(total ? done / total : 1);
@@ -167,6 +183,45 @@ export default function App() {
     setSave(next);
     writeSave(next);
   }, []);
+
+  /**
+   * Persist the mixer whenever the player moves a slider.
+   *
+   * Subscribing here rather than threading save/persist props down to every
+   * screen that shows the panel is what lets the PAUSE MENU carry the same
+   * control without GameScreen learning anything about the save layer.
+   *
+   * Debounced because a drag emits a change per step crossed, and each one
+   * would otherwise be a JSON serialise and an AsyncStorage write — twenty of
+   * them in the second it takes to sweep a slider. The trailing write is the
+   * only one that matters; `persist` itself declines a no-op update, so a
+   * settle on the value it already had costs nothing.
+   */
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = onAudioChange((next: AudioSettings) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        persist((prev) =>
+          prev.audio.ui === next.ui && prev.audio.sfx === next.sfx && prev.audio.music === next.music
+            ? prev
+            : { ...prev, audio: next }
+        );
+      }, AUDIO_WRITE_DEBOUNCE_MS);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      // Flush rather than drop: a player who backs out of settings and closes
+      // the app immediately must not lose the change they just made.
+      persist((prev) => {
+        const live = audioSettings();
+        return prev.audio.ui === live.ui && prev.audio.sfx === live.sfx && prev.audio.music === live.music
+          ? prev
+          : { ...prev, audio: live };
+      });
+      unsubscribe();
+    };
+  }, [persist]);
 
   const startGame = useCallback(() => {
     setRunId((id) => id + 1);
@@ -405,6 +460,7 @@ export default function App() {
             onHangar={() => setPhase('hangar')}
             onStats={() => setPhase('stats')}
             onQuests={() => setPhase('quests')}
+            onSettings={() => setPhase('settings')}
           />
         )}
         {phase === 'playing' && (
@@ -464,6 +520,12 @@ export default function App() {
           />
         )}
         {phase === 'stats' && <StatsScreen save={save} onBack={() => setPhase('menu')} />}
+        {phase === 'settings' && (
+          <SettingsScreen
+            backgroundId={selectedBackground.id}
+            onBack={() => setPhase('menu')}
+          />
+        )}
         {phase === 'quests' && (
           <QuestsScreen
             save={save}

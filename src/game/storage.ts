@@ -14,6 +14,7 @@ import {
 } from './progression';
 import { MAX_UPGRADE_LEVEL } from './upgrades';
 import { QuestState, freshQuests, normalizeQuests } from './missions';
+import { AudioSettings, DEFAULT_AUDIO, normalizeAudio } from './mixer';
 import { AVATARS, BACKGROUNDS } from './constants';
 
 const KEY = 'doomscroll:save:v1'; // storage key is historical — the SCHEMA is
@@ -63,6 +64,12 @@ export interface SaveData {
    * this needed no SAVE_VERSION bump (see the note on SAVE_VERSION).
    */
   quests: QuestState;
+  /**
+   * Per-channel volumes, 0..1. Also additive: an older save has no `audio`
+   * key, normalizeAudio reads that as unity, and the player hears exactly the
+   * mix they heard before they updated. See src/game/mixer.ts.
+   */
+  audio: AudioSettings;
 }
 
 export const DEFAULT_SAVE: SaveData = {
@@ -79,6 +86,7 @@ export const DEFAULT_SAVE: SaveData = {
   upgrades: {},
   stats: freshStats(),
   quests: freshQuests(),
+  audio: { ...DEFAULT_AUDIO },
 };
 
 // A spread of DEFAULT_SAVE would alias its array/object fields — callers
@@ -90,6 +98,7 @@ const freshDefault = (): SaveData => ({
   upgrades: {},
   stats: freshStats(),
   quests: freshQuests(),
+  audio: { ...DEFAULT_AUDIO },
 });
 
 // --- Wallet helpers ----------------------------------------------------------
@@ -233,6 +242,7 @@ export function normalizeSave(raw: RawSave): SaveData {
     // The stat normalizer is passed IN rather than imported by missions.ts,
     // which keeps the quest engine free of any dependency on the save layer.
     quests: normalizeQuests(raw.quests, (v) => normalizeStats(v as Partial<Stats> | undefined)),
+    audio: normalizeAudio(raw.audio),
   };
 }
 

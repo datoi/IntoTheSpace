@@ -56,7 +56,7 @@ export type IconName =
   | 'vampiric'
   | 'swift'
   | 'volatile'
-  // --- Navigation & state (12) ---
+  // --- Navigation & state (16) ---
   | 'play'
   | 'hangar'
   | 'shop'
@@ -69,6 +69,13 @@ export type IconName =
   | 'check'
   | 'chevron'
   | 'info'
+  | 'settings'
+  // The three mixer channels. Each has to say WHICH FAMILY it governs at 18px
+  // on a settings row, so they are drawn from three different metaphors —
+  // instrument, speaker, finger — rather than three variations on a speaker.
+  | 'music'
+  | 'sound'
+  | 'ui'
   // --- Ribbon marks (3) ---
   | 'flawless'
   | 'speed'
@@ -309,6 +316,39 @@ const GLYPHS: Record<IconName, (filled: boolean) => React.ReactNode> = {
       <Circle cx={12} cy={12} r={8.5} />
       <Path d="M12 11v6" />
       <Circle cx={12} cy={7.8} r={1} fill="currentColor" />
+    </>
+  ),
+  // A ring with eight teeth rather than an outlined cog: at 18px an
+  // illustrated cog collapses into a grey disc, whereas spokes off a ring stay
+  // countable.
+  settings: () => (
+    <>
+      <Circle cx={12} cy={12} r={6.4} />
+      <Circle cx={12} cy={12} r={2.6} />
+      <Path d="M18.4 12h2.2M16.53 7.47l1.55-1.55M12 5.6V3.4M7.47 7.47L5.92 5.92M5.6 12H3.4M7.47 16.53l-1.55 1.55M12 18.4v2.2M16.53 16.53l1.55 1.55" />
+    </>
+  ),
+  music: () => (
+    <>
+      <Path d="M9 17V6.2l10-2.2V15" />
+      <Circle cx={6.6} cy={17.4} r={2.6} />
+      <Circle cx={16.6} cy={15.4} r={2.6} />
+    </>
+  ),
+  sound: () => (
+    <>
+      <Path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4z" />
+      <Path d="M15.5 9.2a4 4 0 010 5.6" />
+      <Path d="M18.2 6.8a7.6 7.6 0 010 10.4" />
+    </>
+  ),
+  // A press and the ripple it makes — the shell answering a finger, which is
+  // exactly what the ui channel carries.
+  ui: () => (
+    <>
+      <Circle cx={12} cy={12} r={2.4} fill="currentColor" />
+      <Path d="M7.8 16.2a6 6 0 010-8.4M16.2 7.8a6 6 0 010 8.4" />
+      <Path d="M5.1 18.9a9.8 9.8 0 010-13.8M18.9 5.1a9.8 9.8 0 010 13.8" />
     </>
   ),
 

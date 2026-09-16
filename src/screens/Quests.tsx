@@ -29,6 +29,7 @@ import {
   liveWeeklyChallenges,
 } from '../game/missions';
 import { FONTS } from '../game/type';
+import { playUi } from '../game/sounds';
 import CoinIcon from '../components/Coin';
 import { useChrome, useThemedStyles } from '../components/Theme';
 import { Button } from '../components/Button';
@@ -90,7 +91,10 @@ function QuestRow({ quest, save, runBests, claimed, onClaim }: QuestRowProps) {
   return (
     <Pressable
       disabled={!claimable}
-      onPress={onClaim}
+      onPress={() => {
+        playUi('confirm');
+        onClaim();
+      }}
       style={({ pressed }) => [
         styles.row,
         claimable && styles.rowClaimable,
@@ -192,7 +196,10 @@ function LoginCalendar({
       </View>
       <Pressable
         disabled={!available}
-        onPress={onClaimLogin}
+        onPress={() => {
+          playUi('confirm');
+          onClaimLogin();
+        }}
         style={({ pressed }) => [
           styles.loginBtn,
           !available && styles.loginBtnDone,
@@ -236,7 +243,10 @@ export function QuestsScreen({ save, now = Date.now(), onClaim, onClaimLogin, on
         {tabs.map((t) => (
           <Pressable
             key={t.id}
-            onPress={() => setTab(t.id)}
+            onPress={() => {
+              playUi('select');
+              setTab(t.id);
+            }}
             style={[styles.tab, tab === t.id && styles.tabActive]}
           >
             <Text style={[styles.tabTxt, tab === t.id && styles.tabTxtActive]}>{t.label}</Text>

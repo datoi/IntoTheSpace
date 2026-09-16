@@ -29,6 +29,7 @@ import {
   upgradeCost,
 } from '../game/upgrades';
 import { FONTS } from '../game/type';
+import { playUi } from '../game/sounds';
 import CoinIcon from '../components/Coin';
 import { useThemedStyles } from '../components/Theme';
 import { Button } from '../components/Button';
@@ -125,7 +126,10 @@ export function HangarScreen({ save, shipStats, onBuyUpgrade, onSelectAvatar, on
         {owned.map((a) => (
           <Pressable
             key={a.id}
-            onPress={() => setViewing(a.id)}
+            onPress={() => {
+              playUi('select');
+              setViewing(a.id);
+            }}
             style={({ pressed }) => [
               styles.shipChip,
               viewing === a.id && styles.shipChipActive,
@@ -157,7 +161,10 @@ export function HangarScreen({ save, shipStats, onBuyUpgrade, onSelectAvatar, on
         </Text>
         {!isEquipped && (
           <Pressable
-            onPress={() => onSelectAvatar(ship.id)}
+            onPress={() => {
+              playUi('confirm');
+              onSelectAvatar(ship.id);
+            }}
             style={({ pressed }) => [styles.equipBtn, pressed && styles.pressed]}
           >
             <Text style={styles.equipTxt}>EQUIP THIS HULL</Text>
@@ -180,7 +187,14 @@ export function HangarScreen({ save, shipStats, onBuyUpgrade, onSelectAvatar, on
               // `selectedAvatar`, so allowing it here would silently invest in
               // the wrong ship.
               disabled={maxed || !affordable || !isEquipped}
-              onPress={() => onBuyUpgrade(kind)}
+              // A level bought is the same transaction as a hull bought, so it
+              // speaks with the same voice. There is no 'deny' branch here:
+              // unlike a shop row, an unaffordable upgrade is `disabled` and
+              // never fires a press at all.
+              onPress={() => {
+                playUi('confirm');
+                onBuyUpgrade(kind);
+              }}
               style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             >
               <Icon name={def.icon} size={22} color={PALETTE.plasma} />

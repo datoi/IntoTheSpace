@@ -14,16 +14,35 @@ const flatten = (style: unknown): Record<string, any> =>
 
 describe('MenuScreen', () => {
   it('renders the title and coins but hides BEST before the first run', async () => {
-    await render(<MenuScreen save={{ ...freshSave, likes: 40 }} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
+    await render(<MenuScreen save={{ ...freshSave, likes: 40 }} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} onSettings={jest.fn()} />);
     expect(screen.getByText('SPACE')).toBeTruthy();
     expect(screen.queryByText(/BEST/)).toBeNull();
     expect(screen.getByText('40')).toBeTruthy();
   });
 
+  it('opens the audio settings from the gear in the top bar', async () => {
+    // Volume is the setting players look for first and give up on fastest, so
+    // it gets a fixed position in the chrome rather than a place in the rail.
+    const onSettings = jest.fn();
+    await render(
+      <MenuScreen
+        save={freshSave}
+        onStart={jest.fn()}
+        onShop={jest.fn()}
+        onHangar={jest.fn()}
+        onStats={jest.fn()}
+        onQuests={jest.fn()}
+        onSettings={onSettings}
+      />
+    );
+    fireEvent.press(screen.getByTestId('menu-settings'));
+    expect(onSettings).toHaveBeenCalled();
+  });
+
   it('paints the SPACE half of the title in the equipped sky', async () => {
     // INTO THE stays ink; SPACE is the accent, and the accent follows the sky.
     const menu = (
-      <MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />
+      <MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} onSettings={jest.fn()} />
     );
     await render(<ThemeProvider backgroundId="ember">{menu}</ThemeProvider>);
     expect(flatten(screen.getByText('SPACE').props.style).color).toBe(chromeFor('ember').accent);
@@ -39,7 +58,7 @@ describe('MenuScreen', () => {
 
   it('paints LIFT OFF in the equipped sky', async () => {
     const menu = (
-      <MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />
+      <MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} onSettings={jest.fn()} />
     );
     await render(<ThemeProvider backgroundId="violet">{menu}</ThemeProvider>);
     expect(flatten(screen.getByText('LIFT OFF').props.style).color).toBe(
@@ -54,7 +73,7 @@ describe('MenuScreen', () => {
       likes: 25,
       stats: { ...freshSave.stats, bestScore: 4200 },
     };
-    await render(<MenuScreen save={save} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
+    await render(<MenuScreen save={save} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} onSettings={jest.fn()} />);
     expect(screen.getByText('BEST')).toBeTruthy();
     expect(screen.getByText('4,200')).toBeTruthy();
     expect(screen.getByText('25')).toBeTruthy();
@@ -67,7 +86,7 @@ describe('MenuScreen', () => {
     // ship's name. It now lives in a fixed slot that is strictly larger than it,
     // which is what guarantees clearance no matter what the name's font does.
     await render(
-      <MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />
+      <MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} onSettings={jest.fn()} />
     );
 
     // The disc: a circle filled with the plasma glow.
@@ -95,7 +114,7 @@ describe('MenuScreen', () => {
   it('starts the game and opens the shop', async () => {
     const onStart = jest.fn();
     const onShop = jest.fn();
-    await render(<MenuScreen save={freshSave} onStart={onStart} onShop={onShop} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
+    await render(<MenuScreen save={freshSave} onStart={onStart} onShop={onShop} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} onSettings={jest.fn()} />);
     await fireEvent.press(screen.getByText('LIFT OFF'));
     expect(onStart).toHaveBeenCalledTimes(1);
     await fireEvent.press(screen.getByText('SHOP'));
@@ -109,7 +128,7 @@ describe('MenuScreen', () => {
     const onShop = jest.fn();
     const onStart = jest.fn();
     await render(
-      <MenuScreen save={freshSave} onStart={onStart} onShop={onShop} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />
+      <MenuScreen save={freshSave} onStart={onStart} onShop={onShop} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} onSettings={jest.fn()} />
     );
     await fireEvent.press(screen.getByTestId('menu-hull'));
     expect(onShop).toHaveBeenCalledTimes(1);
@@ -120,7 +139,7 @@ describe('MenuScreen', () => {
   it('falls back to the first avatar when the selected id is unknown', async () => {
     const save = { ...freshSave, selectedAvatar: 'deleted-avatar' };
     await expect(
-      render(<MenuScreen save={save} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />)
+      render(<MenuScreen save={save} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} onSettings={jest.fn()} />)
     ).resolves.toBeTruthy();
   });
 });
@@ -321,7 +340,7 @@ describe('ShopScreen', () => {
 
 describe('PickupGuide (menu overlay)', () => {
   const openGuide = async () => {
-    await render(<MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
+    await render(<MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} onSettings={jest.fn()} />);
     await fireEvent.press(screen.getAllByText('PICK-UPS')[0]);
   };
 
@@ -336,7 +355,7 @@ describe('PickupGuide (menu overlay)', () => {
   });
 
   it('is hidden until requested', async () => {
-    await render(<MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} />);
+    await render(<MenuScreen save={freshSave} onStart={jest.fn()} onShop={jest.fn()} onHangar={jest.fn()} onStats={jest.fn()} onQuests={jest.fn()} onSettings={jest.fn()} />);
     expect(screen.getAllByText('PICK-UPS').length).toBe(1);
   });
 
