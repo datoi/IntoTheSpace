@@ -1,6 +1,10 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    // TS 6 no longer auto-includes ambient-only @types packages, and nothing
+    // imports @types/jest — without this the test globals (describe/it/expect)
+    // are invisible to the typechecker across every suite.
+    "types": ["jest", "node"]
   }
 }

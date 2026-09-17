@@ -187,11 +187,11 @@ export function LowHullPulse({ active, reduceMotion }: { active: boolean; reduce
 
 const styles = StyleSheet.create({
   vignette: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   // A thick inset border reads as a vignette without needing a gradient library.
   vignetteEdge: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderWidth: 26,
     borderColor: PALETTE.threatGlow,
     borderRadius: 34,

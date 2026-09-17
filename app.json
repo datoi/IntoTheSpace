@@ -42,7 +42,10 @@
     ],
     "plugins": [
       "expo-font",
-      "./plugins/withPreferred60Hz"
+      "./plugins/withPreferred60Hz",
+      "expo-asset",
+      "expo-audio",
+      "expo-status-bar"
     ]
   }
 }
