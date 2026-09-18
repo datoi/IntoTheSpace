@@ -54,6 +54,15 @@ export interface Chrome {
   accent: string;
   /** The dark label drawn ON `accent`. Same hue, floor lightness. */
   accentInk: string;
+  /**
+   * `accent` at glow strength — the lit disc behind the menu's hull, and
+   * anything else that wants the accent as a wash rather than as a fill.
+   *
+   * Exists for the same reason `accent` does: the shell had one translucent
+   * cyan (`PALETTE.plasmaGlow`) doing this job, and a cyan glow under a rose
+   * sky is the one thing in the room that refuses to belong to it.
+   */
+  accentGlow: string;
   /** The dim behind the pause menu. Translucent, so the run shows through. */
   scrim: string;
 }
@@ -167,6 +176,8 @@ const EDGE_SOFT_BASE = '#182235'; // the rgb half of PALETTE.edgeSoft
 const ACCENT_INK_BASE = '#04121A'; // dark-on-bright, per the §3 allowlist
 const SCRIM_BASE = '#060810';
 const SCRIM_ALPHA = 0.82;
+/** Matches the alpha PALETTE.plasmaGlow ships with, so the default is unchanged. */
+const ACCENT_GLOW_ALPHA = 0.35;
 
 /** Pack an opaque hex into an rgba() string at a fixed alpha. */
 function withAlpha(hex: string, alpha: number): string {
@@ -249,6 +260,7 @@ export function chromeFrom(tint: ChromeTint): Chrome {
   for (const k of GROUND_KEYS) out[k] = retint(PALETTE[k], tint);
   out.edgeSoft = withAlpha(retint(EDGE_SOFT_BASE, tint), EDGE_SOFT_ALPHA);
   out.accent = retintVivid(PALETTE.plasma, tint, ACCENT_LUM_FLOOR);
+  out.accentGlow = withAlpha(out.accent, ACCENT_GLOW_ALPHA);
   out.accentInk = retintVivid(ACCENT_INK_BASE, tint);
   out.scrim = withAlpha(retint(SCRIM_BASE, tint), SCRIM_ALPHA);
   return out as unknown as Chrome;
@@ -269,6 +281,7 @@ export const DEFAULT_CHROME: Chrome = {
   inkMute: PALETTE.inkMute,
   // Under the shipped chrome the accent IS plasma. Everywhere else they part.
   accent: PALETTE.plasma,
+  accentGlow: PALETTE.plasmaGlow,
   accentInk: ACCENT_INK_BASE,
   scrim: withAlpha(SCRIM_BASE, SCRIM_ALPHA),
 };

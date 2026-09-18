@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Image, StyleSheet, PanResponder, Pressable, AppState, Animated } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, Image, StyleSheet, PanResponder, Pressable, AppState, Animated, Easing } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import ObstacleView from '../components/Obstacle';
 import ParticleLayer from '../components/ParticleLayer';
@@ -8,6 +8,8 @@ import { ParallaxBackground, layerPeriod } from '../components/Parallax';
 import { FONTS, TYPE } from '../game/type';
 import Icon from '../components/Icon';
 import { LowHullPulse, useReduceMotion } from '../components/Motion';
+import EnergyShell from '../components/EnergyShell';
+import { makePickupPhases, PickupPhase } from '../components/Pickup';
 import { AudioMixerPanel } from '../components/AudioMixer';
 import { useThemedStyles } from '../components/Theme';
 import { Chrome } from '../game/theme';
@@ -16,13 +18,13 @@ import {
   HUD,
   HealthBar,
   SpecialButton,
+  TopScrim,
   WaveHeader,
   BossBar,
   boonChipKey,
 } from '../components/Effects';
 import { Card, Bullet, EnemyBullet, GunKind, SpecialKind, GameState, RunResult } from '../game/types';
-import { play, playKill, playShot, playGraze, playPickup, playSystem, playUi } from '../game/sounds';
-import { startMusic, pauseMusic, stopMusic } from '../game/music';
+import { play, playKill, playShot, playGraze, playPickup, playSystem, playBlock, playUi } from '../game/sounds';
 // Every haptic in the run goes through this budget rather than at the motor
 // directly — see haptics.ts for why a graze storm was drowning out damage.
 import { haptic, hapticFailure, HapticWeight } from '../game/haptics';
@@ -202,7 +204,6 @@ import {
   BOMB_BTN_LEFT,
   BOMB_BTN_BOTTOM,
   VOLLEY_DAMPEN,
-  SHIELD_RING,
   SHIELD_COLOR,
   SHIELD_HITS,
   AVATAR_HULL_CY,
@@ -228,9 +229,17 @@ import {
   CHAIN_HUD_HOT,
   BULWARK_TIME,
   BULWARK_TIME_OVER,
-  BULWARK_RING,
   BULWARK_COLOR,
-  BULWARK_CORE,
+  SHELL_IMPACT_MS,
+  SHIELD_BREAK_TIME,
+  PICKUP_CYCLE_MS,
+  PICKUP_PHASES,
+  PICKUP_SPEED_VAR,
+  PICKUP_DRIFT_PX,
+  PICKUP_DRIFT_FREQ,
+  PICKUP_DRIFT_SEED,
+  PICKUP_VIS,
+  LANE_W,
   BULWARK_REFLECT_DMG,
   BULWARK_REFLECT_MAX,
   BULWARK_REFLECT_SPEED,
@@ -288,7 +297,6 @@ interface Props {
    */
   shipStats: ShipStats;
   background: BgSet; // the one environment shown for the whole run
-  backgroundId: string; // which sky it is — picks the music pair (see music.ts)
   resume?: GameState | null; // restore an in-progress run instead of starting fresh
   startPaused?: boolean; // resumed runs open on the pause screen
   onGameOver: (result: RunResult) => void;
@@ -526,37 +534,11 @@ const BombButton = React.memo(function BombButton({
         pressed && styles.bombPressed,
       ]}
     >
-      <Icon name="bomb" size={22} color={empty ? PALETTE.inkMute : PALETTE.amber} />
+      <Icon name="bomb" size={22} color={empty ? PALETTE.inkDim : PALETTE.amber} />
       <Text style={[styles.bombCount, empty && styles.bombCountEmpty]}>{count}</Text>
     </Pressable>
   );
 });
-
-// Ironclad's shell, drawn around the hull while BULWARK holds. Thicker and
-// brighter than the shield boon's hoop, because it does more: it eats fire and
-// throws it back.
-function BulwarkShell({ x, y, time, over }: { x: number; y: number; time: number; over: boolean }) {
-  const d = BULWARK_RING * (over ? 1.12 : 1);
-  return (
-    <View
-      pointerEvents="none"
-      style={{
-        position: 'absolute',
-        left: 0,
-        top: 0,
-        width: d,
-        height: d,
-        borderRadius: d / 2,
-        borderWidth: 3.5,
-        borderColor: BULWARK_COLOR,
-        backgroundColor: BULWARK_CORE,
-        // Thins out over the last second as a warning that it's about to drop.
-        opacity: Math.min(1, time) * 0.9,
-        transform: [{ translateX: x - d / 2 }, { translateY: y - d / 2 }],
-      }}
-    />
-  );
-}
 
 // --- Why everything below is placed with `transform`, never `left`/`top` -----
 //
@@ -582,7 +564,6 @@ export default function GameScreen({
   avatarSpecial,
   shipStats,
   background,
-  backgroundId,
   resume,
   startPaused,
   onGameOver,
@@ -636,6 +617,31 @@ export default function GameScreen({
     core: new Animated.Value(0),
     flash: new Animated.Value(0),
   });
+  // The energy shells (the SHIELD boon and BULWARK), driven natively.
+  //
+  // Position is an Animated.Value rather than a prop because the shell follows
+  // a ship that moves every frame and can be on screen for seconds with a full
+  // board. Written with setValue() from the loop — the parallax pattern — so
+  // the shell's whole subtree, gradient and arcs included, mounts once per
+  // pickup and never reconciles again. Both shells share these: only one of
+  // them can be centred on the hull, because they are both centred on the hull.
+  //
+  // Seeded from where the ship ALREADY IS rather than from zero. A run resumed
+  // with a live shield mounts its shell on the first render, which happens
+  // before the loop's first tick — so a zero seed would draw the bubble in the
+  // top-left corner of the screen for one frame before it snapped onto the hull.
+  const shellX = useRef(new Animated.Value(g.current.avatarX));
+  const shellY = useRef(new Animated.Value(hullY(g.current)));
+  // An absorbed hit: the angle to the contact point, then a 1→0 decay that
+  // drives the ripple, the hardening rim and the field's inward flex.
+  const shellHit = useRef(new Animated.Value(0));
+  const shellHitA = useRef(new Animated.Value(0));
+  // The one idle loop every falling pickup reads. ONE value for the whole
+  // board, turned into a fixed set of phase buckets once — a pickup picks its
+  // bucket by id and only ever references those nodes, so no drop owns an
+  // animation, a timer or an interpolation of its own. See Pickup.tsx.
+  const pickupAnim = useRef(new Animated.Value(0));
+  const pickupPhases = useMemo(() => makePickupPhases(pickupAnim.current), []);
   // Assigned inside the loop effect (like resumeLoopRef) so the button's press
   // handler can reach the spawn helpers that live in that closure.
   const fireSpecialRef = useRef<() => void>(() => {});
@@ -720,25 +726,30 @@ export default function GameScreen({
     onHome();
   }, [onPersist, onHome]);
 
-  // The run's soundtrack: the pair belonging to the equipped sky.
-  //
-  // Driven by `paused` rather than by the loop, so it follows every route into
-  // a stopped run for free — the pause button, going home, and the AppState
-  // handler below, which pauses on backgrounding. A player who alt-tabs should
-  // not still be hearing the game.
-  //
-  // Released on unmount rather than merely paused: a finished run is one whose
-  // music will never resume, and holding two multi-megabyte streams alive for
-  // every run of a session is how a low-end device runs out of audio memory.
-  useEffect(() => {
-    if (paused) pauseMusic();
-    else startMusic(backgroundId);
-  }, [paused, backgroundId]);
-
-  useEffect(() => stopMusic, []);
-
   // Closing / backgrounding the app pauses and snapshots the run so it can be
   // resumed on next launch.
+  /**
+   * Drive the shared pickup loop.
+   *
+   * One `Animated.loop` for every drop on screen, on the native driver, started
+   * once per run. Under reduce-motion it never starts and the value stays at 0,
+   * which is also what the render checks before handing a pickup a phase — so a
+   * still pickup costs nothing rather than animating invisibly.
+   */
+  useEffect(() => {
+    if (reduceMotion) return;
+    const loop = Animated.loop(
+      Animated.timing(pickupAnim.current, {
+        toValue: 1,
+        duration: PICKUP_CYCLE_MS,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [reduceMotion]);
+
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
       if (st !== 'active' && !overRef.current && !pausedRef.current) {
@@ -1054,17 +1065,51 @@ export default function GameScreen({
     /** Anything that makes the player untouchable right now. */
     const isInvulnerable = () => shieldUp() || g.current.bulwarkTime > 0;
 
-    const takeHit = (label?: string) => {
+    /**
+     * Flare the shell at the point a shot actually stopped.
+     *
+     * The angle is measured from the HULL CENTRE, which is the point both
+     * shells are drawn around, so the ripple lands on the rim exactly where the
+     * bullet met it. Pushed straight at the native driver: an absorbed hit can
+     * land several times inside one burst, and this must never cost a render.
+     */
+    const flareShell = (hx: number, hy: number) => {
+      const s = g.current;
+      // Screen angle to the contact point, converted to the ripple's frame —
+      // its disc is parked at twelve o'clock, which is -90° in screen space.
+      const deg = (Math.atan2(hy - hullY(s), hx - s.avatarX) * 180) / Math.PI + 90;
+      shellHitA.current.setValue(deg);
+      shellHit.current.setValue(1);
+      Animated.timing(shellHit.current, {
+        toValue: 0,
+        duration: SHELL_IMPACT_MS,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+    };
+
+    const takeHit = (label?: string, hx?: number, hy?: number) => {
       const s = g.current;
       if (isInvulnerable()) {
         // Absorbed outright. Loud feedback matters here: a silent save reads as
         // a missed collision, and the player stops trusting the shield.
         const bulwark = s.bulwarkTime > 0;
         s.shake = Math.max(s.shake, SHAKE_ABSORB);
-        playSystem('block');
+        // The block sound drops a step per charge spent, so the shield is
+        // AUDIBLY weakening — the same information the arcs carry, for a player
+        // whose eyes are on the bullets rather than on their own hull.
+        playBlock(bulwark ? SHIELD_HITS : s.shieldLeft - 1, SHIELD_HITS);
         haptic(HapticWeight.Medium);
         const tint = bulwark ? BULWARK_COLOR : SHIELD_COLOR;
-        burst(s.avatarX, s.avatarY, tint, 10);
+        // Where the shot actually stopped, falling back to the hull centre for
+        // the one caller that has no contact point. This used to fire at
+        // `s.avatarY` — the HITBOX origin, ~15px off the drawn hull — so the
+        // sparks came out of the middle of the ship instead of off the surface
+        // that stopped them.
+        const cx = hx ?? s.avatarX;
+        const cy = hy ?? hullY(s);
+        flareShell(cx, cy);
+        burst(cx, cy, tint, 10);
         float(s.avatarX, s.avatarY - 40, bulwark ? 'BULWARK' : 'BLOCKED', tint);
         // Bulwark runs its own budget (`bulwarkLeft`) and its own timer, so only
         // the boon spends a charge here. Bulwark is checked FIRST, which means a
@@ -1078,6 +1123,11 @@ export default function GameScreen({
             // running out, and a shatter must not also report "SHIELD OVER" a
             // frame later. This is the only message for it.
             delete s.boons.shield;
+            // …but the SHELL outlives the boon by exactly its break animation.
+            // Protection ends here, with the delete above; this only keeps the
+            // volume on screen long enough to be seen coming apart, so the last
+            // charge reads as a shatter instead of a disappearance.
+            s.shieldBreakT = SHIELD_BREAK_TIME;
             // Deliberately NO shake: the absorb above already spent it on this
             // same hit, and a shatter is not damage reaching the hull. The
             // bigger burst, the label, the buzz and a heavy haptic carry it —
@@ -1339,13 +1389,14 @@ export default function GameScreen({
     // Timed boons write a countdown into s.boons; instants resolve here and
     // store nothing. Split this way so adding a boon means one case, not a new
     // GameState field.
-    const collectBoon = (kind: BoonKind) => {
+    const collectBoon = (kind: BoonKind, px: number, py: number) => {
       const s = g.current;
       const def = BOONS[kind];
       s.pickupsCollected += 1;
       playPickup(kind);
       haptic(HapticWeight.Medium, Haptics.ImpactFeedbackStyle.Medium);
-      burst(s.avatarX, s.avatarY, def.color, 14);
+      // At the drop, not at the ship — see the note at the contact site.
+      burst(px, py, def.color, 14);
       float(s.avatarX, s.avatarY - 44, def.name.toUpperCase(), def.color);
 
       if (!isInstant(kind)) {
@@ -1577,6 +1628,26 @@ export default function GameScreen({
       }
       // Ironclad's shell runs down on its own timer.
       if (s.bulwarkTime > 0) s.bulwarkTime = Math.max(0, s.bulwarkTime - dt);
+      // The shield's shatter plays out after the boon itself is already gone.
+      if (s.shieldBreakT > 0) s.shieldBreakT = Math.max(0, s.shieldBreakT - dt);
+
+      // Follow the hull with whichever shell is up. Written straight to the
+      // native side, so a shell that tracks the ship every frame costs two
+      // setValue calls and no React work at all.
+      //
+      // Centred on the DRAWN HULL, not the hitbox. Those are ~15px apart (see
+      // AVATAR_HULL_CY); using the hitbox centre is what once put the bubble
+      // behind the ship with its nose sticking out the front. The offset lives
+      // here now rather than in a style, but it is the same offset.
+      //
+      // This is the hull CENTRE, not a top-left corner: the two shells are
+      // different diameters, so each one recentres itself on this point with
+      // its own half-diameter (see EnergyShell's `shell` style). One pair of
+      // values can then serve both.
+      if (s.shieldBreakT > 0 || s.bulwarkTime > 0 || (isShielded(s.boons) && s.shieldLeft > 0)) {
+        shellX.current.setValue(s.avatarX);
+        shellY.current.setValue(hullY(s));
+      }
 
       // The chain window burns down; once it lapses the multiplier sheds one
       // step at a time rather than collapsing.
@@ -1757,7 +1828,20 @@ export default function GameScreen({
         } else {
           // Pickups (heart / coin / gift / boon) drift down slower than the
           // world so you have time to line up under them.
-          c.y += speed * PICKUP_FALL_SCALE * dt;
+          //
+          // Fall speed varies PER DROP, and each one wanders sideways around
+          // the column it spawned in. Every drop used to leave on one of LANES
+          // fixed columns and fall dead straight at an identical rate, which is
+          // why they read as sliding down invisible rails — nothing in a vacuum
+          // moves like that. Both variations are derived from the card id, so
+          // they cost no state, no allocation and no randomness per frame, and
+          // a resumed run behaves exactly as it did before it was paused.
+          c.y += speed * PICKUP_FALL_SCALE * pickupFallMult(c.id) * dt;
+          if (c.homeX !== undefined) {
+            c.cx =
+              c.homeX +
+              Math.sin((s.elapsed + c.id * PICKUP_DRIFT_SEED) * PICKUP_DRIFT_FREQ) * PICKUP_DRIFT_PX;
+          }
           // Coin Magnet: coins on screen come to YOU. Only coins — magnetising
           // hearts and gun drops would remove the last bit of positioning the
           // pickups ask for.
@@ -1769,6 +1853,9 @@ export default function GameScreen({
             if (d < MAGNET_RADIUS && d > 0.5) {
               c.cx = cxNow + (dx / d) * MAGNET_PULL * dt;
               c.y += (dy / d) * MAGNET_PULL * dt;
+              // Re-anchor, or next frame's drift would yank the coin straight
+              // back to the column it was born in and fight the magnet.
+              c.homeX = c.cx;
             }
           }
         }
@@ -1787,13 +1874,20 @@ export default function GameScreen({
             c.dead = true;
             c.deadT = 0;
           }
+          // Where the DROP was, not where the ship is. Every pickup burst used
+          // to fire at `s.avatarX, s.avatarY` — which is the hitbox origin,
+          // ~15px off the drawn hull — so the sparks came out of the middle of
+          // the ship rather than off the thing the player just took. The eye is
+          // on the drop at that instant; that is where the payoff belongs.
+          const px = cardX(c);
+          const py = c.y + c.h / 2;
           if (c.kind === 'heart') {
             s.hearts = Math.min(s.maxHearts, s.hearts + 1);
             s.heartsCollected += 1;
             s.pickupsCollected += 1;
             playPickup('heart');
             haptic(HapticWeight.Light);
-            burst(s.avatarX, s.avatarY, PALETTE.plasma, 12);
+            burst(px, py, PALETTE.plasma, 12);
             float(s.avatarX, s.avatarY - 40, '+1 HULL', PALETTE.plasma);
           } else if (c.kind === 'coin') {
             const value = coinValue(s.boons);
@@ -1801,12 +1895,12 @@ export default function GameScreen({
             s.pickupsCollected += 1;
             playPickup('coin');
             haptic(HapticWeight.Light);
-            burst(s.avatarX, s.avatarY, COIN_GOLD, 10);
+            burst(px, py, COIN_GOLD, 10);
             float(s.avatarX, s.avatarY - 40, `+${value} COIN${value > 1 ? 'S' : ''}`, COIN_GOLD);
           } else if (c.kind === 'boon') {
             // A utility pickup. The effect was rolled at spawn so the badge
             // could advertise it; older snapshots without one roll here.
-            collectBoon(c.boon ?? rollBoon(s.wave));
+            collectBoon(c.boon ?? rollBoon(s.wave), px, py);
           } else if (c.kind === 'gift') {
             // The gun was decided at spawn so the drop could show its own art.
             // Snapshots saved before that (resumed v3 runs) have no gun on the
@@ -1824,12 +1918,13 @@ export default function GameScreen({
             s.gunTime = GUN_TIME;
             playPickup('gift');
             haptic(HapticWeight.Medium, Haptics.ImpactFeedbackStyle.Medium);
-            burst(s.avatarX, s.avatarY, PALETTE.gold, 14);
+            burst(px, py, PALETTE.gold, 14);
             const lbl = s.gunLevel > 1 ? `${GUN_LABEL[s.gun]} ×${s.gunLevel}` : GUN_LABEL[s.gun];
             s.pickupsCollected += 1;
             float(s.avatarX, s.avatarY - 40, lbl, PALETTE.gold);
           } else {
-            takeHit();
+            // A ram: the contact point is the hazard's own centre.
+            takeHit(undefined, cardX(c), c.y + c.h / 2);
           }
         }
 
@@ -2018,7 +2113,9 @@ export default function GameScreen({
           }
           burst(b.x, b.y, b.color, 8);
           const blocked = isInvulnerable();
-          takeHit();
+          // The shot's own position is the contact point, so a shell absorbing
+          // it flares exactly where it stopped.
+          takeHit(undefined, b.x, b.y);
           // A Vampiric elite feeds off a landed shot. A blocked hit feeds it
           // nothing — the shield denies the heal as well as the damage, which
           // is what makes it worth having against them.
@@ -2504,6 +2601,20 @@ export default function GameScreen({
   }
   const specialReady = s.specialCharge >= 1;
   const overcharged = s.specialCharge >= ENERGY_OVERCHARGE;
+  // Shield up means the boon is live AND it still has budget. Both conditions,
+  // because a shield with no charges left does not protect and must not draw.
+  const shieldOn = boonActive(s.boons, 'shield') && s.shieldLeft > 0;
+  /**
+   * Which slice of the shared idle loop a drop reads.
+   *
+   * `undefined` means hold still, and it is what reduce-motion and the quality
+   * governor both resolve to. The governor reaches this because the bob is pure
+   * texture: a phone already missing its frame budget should spend nothing on
+   * making rewards look nice, and a still pickup loses no information.
+   */
+  const stillPickups = reduceMotion || qTierRef.current > 0;
+  const pickupPhase = (c: Card): PickupPhase | undefined =>
+    stillPickups ? undefined : pickupPhases[c.id % PICKUP_PHASES];
 
   return (
     <View
@@ -2743,7 +2854,7 @@ export default function GameScreen({
           );
         })}
         {s.cards.map((c) => (
-          <ObstacleView key={c.id} ob={c} avatarShot={avatarShot} />
+          <ObstacleView key={c.id} ob={c} avatarShot={avatarShot} phase={pickupPhase(c)} />
         ))}
         {/* Nova's shockwave, over the enemies it's tearing through and under
             the ship. Mounted for the run and animated natively — see NovaRing. */}
@@ -2780,44 +2891,44 @@ export default function GameScreen({
               <Image source={avatarImage} style={styles.jetImg} resizeMode="contain" fadeDuration={0} />
             </View>
           ))}
-        {/* Shield bubble: a bright hoop around the hull while the boon holds, so
-            "nothing can touch me" is legible at a glance. It thins out over the
-            last second as a warning that it's about to drop. */}
-        {boonActive(s.boons, 'shield') && s.shieldLeft > 0 && (
-          <View
-            pointerEvents="none"
-            style={[
-              styles.shieldRing,
-              {
-                // Two independent warnings, because the shield now has two ways
-                // to end: it thins over its last second (time) and dims as its
-                // charges are spent (hits). A player who can see the hoop
-                // weakening can decide to start dodging again before it pops.
-                opacity:
-                  Math.min(1, (s.boons.shield ?? 0) / 1) *
-                  0.85 *
-                  (0.45 + 0.55 * (s.shieldLeft / SHIELD_HITS)),
-                transform: [
-                  { translateX: s.avatarX - SHIELD_RING / 2 },
-                  // Centred on the DRAWN HULL, not the hitbox. Those are ~15px
-                  // apart (see AVATAR_HULL_CY), and using the hitbox centre is
-                  // what put the bubble behind the ship with its nose sticking
-                  // out the front.
-                  { translateY: s.avatarY + AVATAR_HULL_CY - SHIELD_RING / 2 },
-                ],
-              },
-            ]}
+        {/* The shield boon's volume. Kept mounted through its shatter — see
+            `shieldBreakT` — so the last charge ends in a break rather than in a
+            disappearance. It stops PROTECTING the instant the boon is deleted;
+            this is only the shell playing out.
+
+            Position arrives through shellX/shellY rather than as props, so this
+            subtree mounts once per pickup and is never reconciled again. Both
+            values already carry the hull-centre offset (see the note where the
+            loop writes them). */}
+        {(shieldOn || s.shieldBreakT > 0) && (
+          <EnergyShell
+            strength="shield"
+            x={shellX.current}
+            y={shellY.current}
+            segments={SHIELD_HITS}
+            charges={s.shieldLeft}
+            impact={shellHit.current}
+            impactAngle={shellHitA.current}
+            breaking={s.shieldBreakT > 0}
+            expiring={(s.boons.shield ?? 0) <= 1 && s.shieldBreakT <= 0}
+            reduceMotion={reduceMotion}
+            tier={qTierRef.current}
           />
         )}
-        {/* Ironclad's BULWARK shell, over the shield hoop and under the hull. */}
+        {/* Ironclad's BULWARK, over the shield and under the hull. Same
+            primitive, every parameter turned up, and an UNBROKEN rim — it has
+            no charge budget to segment, and "solid band vs three arcs" is how
+            the player reads which of the two they are wearing. */}
         {s.bulwarkTime > 0 && (
-          <BulwarkShell
-            x={s.avatarX}
-            // Same hull centre as the shield hoop — the shell had the identical
-            // offset, for the identical reason.
-            y={s.avatarY + AVATAR_HULL_CY}
-            time={s.bulwarkTime}
-            over={s.bulwarkTime > BULWARK_TIME}
+          <EnergyShell
+            strength="bulwark"
+            x={shellX.current}
+            y={shellY.current}
+            impact={shellHit.current}
+            impactAngle={shellHitA.current}
+            expiring={s.bulwarkTime <= 1}
+            reduceMotion={reduceMotion}
+            tier={qTierRef.current}
           />
         )}
         {/* The vehicle: an image avatar (e.g. jet) flies as-is; otherwise the
@@ -2900,6 +3011,10 @@ export default function GameScreen({
           <FloatTextView key={f.id} f={f} />
         ))}
       </View>
+      {/* The HUD's backing. Above the play field so it darkens the formation
+          descending through the top band, and below the flashes and the hit
+          vignette so it never dims them. */}
+      <TopScrim />
       {s.hitFlash > 0 && (
         <View
           style={[styles.vignette, { opacity: (s.hitFlash / 0.3) * 0.35 }]}
@@ -2932,7 +3047,7 @@ export default function GameScreen({
       {!paused && (
         <>
           <Pressable testID="pause" onPress={doPause} hitSlop={12} style={styles.pauseBtn}>
-            <Icon name="pause" size={15} color={PALETTE.ink} />
+            <Icon name="pause" size={13} color={PALETTE.ink} />
           </Pressable>
           {/* Bombs: a held resource, so the button shows the count and greys out
               when the bay is empty. Mirrors FIRE on the opposite thumb. */}
@@ -2945,7 +3060,7 @@ export default function GameScreen({
             pulse={specialPulse.current}
             overcharged={overcharged}
             ready={specialReady}
-            label={SPECIALS[avatarSpecial].name}
+            kind={avatarSpecial}
             onPress={doSpecial}
           />
         </>
@@ -2953,7 +3068,6 @@ export default function GameScreen({
       {paused && (
         <PauseMenu
           alt={s.alt}
-          backgroundId={backgroundId}
           onContinue={doContinue}
           onNewGame={doNewGame}
           onHome={doHome}
@@ -3100,6 +3214,9 @@ function releaseCoins(s: GameState): void {
     const q = s.coinQueue.shift()!;
     const coin = makeCard(s, 0, 'coin'); // lane is unused once cx is set
     coin.cx = q.cx;
+    // …and the drift anchor moves with it, or the payout's fan would collapse
+    // back toward the spawn column makeCard rolled.
+    coin.homeX = q.cx;
     coin.y = q.y;
     s.cards.push(coin);
   }
@@ -3130,16 +3247,43 @@ function launchSpear(s: GameState, x: number): void {
   });
 }
 
+/**
+ * A drop's own fall speed, as a multiple of PICKUP_FALL_SCALE.
+ *
+ * Derived from the card id rather than rolled and stored: it has to be the same
+ * number on every frame and after a resume, and a stored field would be one
+ * more thing every snapshot, migration and test has to carry. A small prime
+ * modulus spreads consecutive ids across the range instead of walking it in
+ * order, so two drops that spawn back to back never fall in step.
+ */
+export function pickupFallMult(id: number): number {
+  const f = (id % 7) / 6; // 0..1
+  return 1 + (f - 0.5) * 2 * PICKUP_SPEED_VAR;
+}
+
 function makeCard(s: GameState, lane: number, kind: 'heart' | 'gift' | 'coin' | 'boon'): Card {
   // Pickups (heart / coin / gun / utility boon) that fall down toward the
   // player. A gun drop rolls which gun it grants here, at spawn, so it can fall
   // wearing that gun's art — you read what's coming before deciding whether to
   // go for it. Boons work the same way, rolled by the caller.
   const gun = kind === 'gift' ? GIFT_GUNS[Math.floor(Math.random() * GIFT_GUNS.length)] : undefined;
+  // Spawn anywhere across the play area rather than on one of LANES columns.
+  // `lane` is still honoured as the seed so a caller that wants a specific
+  // column still gets one, but the drop lands somewhere inside it instead of
+  // dead centre — five drops in a row no longer trace five identical lines.
+  // `homeX` is the anchor the sideways drift works around, the same way a
+  // formation enemy uses it.
+  const half = PICKUP_VIS / 2;
+  const minX = FEED_PAD + half;
+  const maxX = SCREEN.W - FEED_PAD - half;
+  const spread = (Math.random() - 0.5) * LANE_W;
+  const homeX = Math.max(minX, Math.min(maxX, laneX(lane) + spread));
   return {
     id: s.nextId++,
     kind,
     lane,
+    cx: homeX,
+    homeX,
     y: -OB_VIS - 10,
     h: OB_HIT,
     emoji: '',
@@ -3202,17 +3346,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: BOMB_FLASH_COLOR,
   },
-  shieldRing: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    width: SHIELD_RING,
-    height: SHIELD_RING,
-    borderRadius: SHIELD_RING / 2,
-    borderWidth: 2.5,
-    borderColor: SHIELD_COLOR,
-    backgroundColor: 'rgba(72,214,255,0.10)',
-  },
   // --- Bomb button (mirrors the FIRE button on the opposite thumb) ---
   bombBtn: {
     position: 'absolute',
@@ -3227,9 +3360,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // An empty bay has to read as EMPTY, not as a half-drawn control. At 0.5
+  // opacity over an 18%-white rim the whole button came to roughly 9% against
+  // the sky, which looks like a rendering artefact rather than a resource the
+  // player is out of — and it is the state the button spends most of the run
+  // in, since BOMB_BASE_CAPACITY is 1.
   bombBtnEmpty: {
-    borderColor: 'rgba(255,255,255,0.18)',
-    opacity: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
+    opacity: 0.8,
   },
   bombIcon: {
     fontSize: 22,
@@ -3245,14 +3383,20 @@ const styles = StyleSheet.create({
     color: PALETTE.inkDim,
   },
   bombPressed: { opacity: 0.7 },
+  // Deliberately smaller than the 44×44 the spec quotes for this region, and
+  // that is safe because the quoted number is a TAP TARGET, not a drawn size:
+  // the Pressable carries hitSlop 12, so a 34px disc is still a 58×58 target.
+  // Pause is the one control on screen the player is not meant to be reaching
+  // for mid-fight, so it should be the quietest thing in the top bar rather
+  // than the same weight as the score.
   pauseBtn: {
     position: 'absolute',
     top: 50,
     right: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.35)',
     alignItems: 'center',
@@ -3361,22 +3505,20 @@ const makePauseStyles = (c: Chrome) =>
 
 const PauseMenu = React.memo(function PauseMenu({
   alt,
-  backgroundId,
   onContinue,
   onNewGame,
   onHome,
 }: {
   alt: number;
-  backgroundId: string;
   onContinue: () => void;
   onNewGame: () => void;
   onHome: () => void;
 }) {
   const styles = useThemedStyles(makePauseStyles);
   // The mixer lives BEHIND a press rather than always-on, because the pause
-  // screen's job is to get the player back into the run: three sliders above
+  // screen's job is to get the player back into the run: the sliders above
   // CONTINUE would put the least-used control in the most valuable position.
-  // But it has to be HERE, because pausing is when a player notices the music
+  // But it has to be HERE, because pausing is when a player notices the game
   // is too loud — sending them out to the menu to fix it costs them the run.
   const [mixing, setMixing] = useState(false);
 
@@ -3384,7 +3526,7 @@ const PauseMenu = React.memo(function PauseMenu({
     return (
       <View style={styles.overlay} testID="pause-menu">
         <Text style={styles.panelTitle}>AUDIO</Text>
-        <AudioMixerPanel previewBg={backgroundId} compact />
+        <AudioMixerPanel compact />
         <Pressable
           onPress={() => {
             playUi('back');

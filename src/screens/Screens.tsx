@@ -162,9 +162,18 @@ export function MenuScreen({
           </Animated.View>
         </View>
         <Text style={styles.pedestalShip}>{avatar.name}</Text>
-        <Text style={[styles.pedestalSpecial, { color: avatar.shot.tint }]}>
-          {SPECIALS[avatar.special].name}
-        </Text>
+        {/* The same mark the FIRE button will wear in the run, so the thing
+            the player reads here is the thing they look for in combat. */}
+        <View style={styles.pedestalSpecialRow}>
+          <Icon
+            name={SPECIALS[avatar.special].icon}
+            size={12}
+            color={SPECIALS[avatar.special].accent}
+          />
+          <Text style={[styles.pedestalSpecial, { color: avatar.shot.tint }]}>
+            {SPECIALS[avatar.special].name}
+          </Text>
+        </View>
       </Pressable>
 
       {/* ONE primary CTA. Everything else drops to the icon rail below, which
@@ -440,7 +449,12 @@ function ShopRow({ name, price, owned, selected, affordable, thumb, special, tie
           <Text style={styles.shopName}>{name}</Text>
           {special && (
             <>
-              <Text style={[styles.shopSpecial, tier ? { color: tier } : null]}>{special.name}</Text>
+              <View style={styles.shopSpecialRow}>
+                <Icon name={special.icon} size={12} color={tier ?? special.accent} />
+                <Text style={[styles.shopSpecial, tier ? { color: tier } : null]}>
+                  {special.name}
+                </Text>
+              </View>
               <Text style={styles.shopSpecialDesc}>{special.desc}</Text>
             </>
           )}
@@ -617,7 +631,7 @@ const makeStyles = (c: Chrome) =>
       width: HULL_GLOW,
       height: HULL_GLOW,
       borderRadius: HULL_GLOW / 2,
-      backgroundColor: PALETTE.plasmaGlow,
+      backgroundColor: c.accentGlow,
       opacity: 0.5,
     },
     pedestalShip: {
@@ -625,9 +639,14 @@ const makeStyles = (c: Chrome) =>
       color: c.ink,
       marginTop: 8,
     },
+    pedestalSpecialRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      marginTop: 2,
+    },
     pedestalSpecial: {
       ...TYPE.micro,
-      marginTop: 2,
     },
     menuCta: { alignSelf: 'stretch' },
     rail: {
@@ -670,34 +689,7 @@ const makeStyles = (c: Chrome) =>
       fontSize: 14,
       fontFamily: FONTS.data,
       letterSpacing: 2,
-    },
-    primary: {
-      backgroundColor: PALETTE.plasma,
-      paddingVertical: 17,
-      paddingHorizontal: 46,
-      borderRadius: 14,
-      marginTop: 6,
-    },
-    primaryTxt: {
-      color: '#04121A',
-      fontSize: 17,
-      fontFamily: FONTS.display,
-      letterSpacing: 2,
-    },
-    secondary: {
-      marginTop: 14,
-      paddingVertical: 13,
-      paddingHorizontal: 40,
-      borderRadius: 14,
-      borderWidth: 1.5,
-      borderColor: 'rgba(255,255,255,0.18)',
-    },
-    secondaryTxt: {
-      color: c.ink,
-      fontSize: 14,
-      fontFamily: FONTS.display,
-      letterSpacing: 2,
-    },
+    },
     pressed: { opacity: 0.75 },
     menuBtnRow: {
       flexDirection: 'row',
@@ -968,7 +960,7 @@ const makeStyles = (c: Chrome) =>
     },
     tabActive: {
       backgroundColor: c.hull,
-      borderColor: PALETTE.plasma,
+      borderColor: c.accent,
     },
     tabTxt: {
       color: c.inkDim,
@@ -1001,7 +993,7 @@ const makeStyles = (c: Chrome) =>
       paddingHorizontal: 9,
       paddingVertical: 4,
       borderRadius: 999,
-      backgroundColor: PALETTE.plasma,
+      backgroundColor: c.accent,
     },
     pillFilledTxt: { ...TYPE.micro, color: '#04121A' },
     pillOutline: {
@@ -1033,15 +1025,20 @@ const makeStyles = (c: Chrome) =>
       marginBottom: 10,
       overflow: 'hidden',
     },
-    shopItemSelected: { borderColor: PALETTE.plasma },
+    shopItemSelected: { borderColor: c.accent },
     shopEmojiImg: { width: 46, height: 50 },
     shopName: { color: c.ink, fontSize: 16, fontWeight: '800' },
+    shopSpecialRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      marginTop: 3,
+    },
     shopSpecial: {
-      color: PALETTE.plasma,
+      color: c.accent,
       fontSize: 11,
       fontFamily: FONTS.display,
       letterSpacing: 1,
-      marginTop: 3,
     },
     shopSpecialDesc: {
       color: c.inkDim,

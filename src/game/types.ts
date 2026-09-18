@@ -228,6 +228,16 @@ export interface GameState {
    * that state is a snapshot from before the budget existed.
    */
   shieldLeft: number;
+  /**
+   * Seconds left of the shield's SHATTER, after its last charge is spent.
+   *
+   * Spending the last charge deletes the boon immediately — that is what stops
+   * it protecting — so without this the shell simply stopped being rendered and
+   * the break was a disappearance rather than an event. This keeps the shell
+   * alive, and visibly breaking, for exactly SHIELD_BREAK_TIME after it stops
+   * working. It never protects during that window.
+   */
+  shieldBreakT: number;
   phantomTime: number; // Specter: seconds of ghost wingmen left
   talonTime: number; // Raptor: seconds of claw barrage left
   talonTimer: number; // Raptor: seconds until the next fan in that barrage

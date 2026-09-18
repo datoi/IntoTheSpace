@@ -56,12 +56,31 @@ import {
   AVATAR_HULL_D,
   AVATAR_HIT_W,
   AVATAR_HIT_H,
+  GIFT_ICON,
+  GIFT_SHOT_LEN,
+  GIFT_DOUBLE_GAP,
+  GUN_DROP_VIS,
+  ENEMY_BULLET_SIZE,
+  ENEMY_BULLET_ART_SCALE,
   SHIELD_RING,
+  SHIELD_ARC_W,
+  BULWARK_ARC_W,
+  BULWARK_MID_ALPHA,
+  BULWARK_RIM_ALPHA,
+  BULWARK_SPIN_MS,
+  SHELL_MID_ALPHA,
+  SHELL_RIM_ALPHA,
+  SHELL_SPIN_MS,
+  SHELL_CLEAR_R,
   SHIELD_HITS,
   BULWARK_RING,
   SPECIALS,
+  SPECIAL_GLYPH_SCRIM,
+  PALETTE,
 } from '../constants';
 import { ARCH_KINDS } from '../enemies';
+import { contrast } from '../theme';
+import type { SpecialKind } from '../types';
 
 describe('the hull, and what gets drawn around it', () => {
   it('does not confuse the drawn hull with the hitbox', () => {
@@ -79,8 +98,38 @@ describe('the hull, and what gets drawn around it', () => {
     expect(SHIELD_RING).toBeGreaterThan(AVATAR_HULL_D);
   });
 
+  it('leaves the rim ramp somewhere to live', () => {
+    // Clearing the hull is necessary but not sufficient. The shell reads as a
+    // VOLUME because opacity ramps across the band between the hull and the
+    // rim; at 92 that band was 5.4px a side and the stroke ate most of it, so
+    // there was nowhere for a ramp to happen and it read as a collar. Both
+    // shells have to keep real room there, or the gradient collapses back into
+    // the outline this redesign replaced.
+    const clearance = (SHIELD_RING - AVATAR_HULL_D) / 2;
+    expect(clearance).toBeGreaterThanOrEqual(9);
+    expect((BULWARK_RING - AVATAR_HULL_D) / 2).toBeGreaterThanOrEqual(9);
+  });
+
   it('keeps Bulwark reading as the heavier of the two shells', () => {
     expect(BULWARK_RING).toBeGreaterThan(SHIELD_RING);
+    // …and not by four pixels. These shipped as 92 vs 96 with a 1px difference
+    // in stroke at an identical hue, which is not a hierarchy — it is two names
+    // for the same drawing. Every parameter the shared primitive takes has to
+    // point the same way.
+    expect(BULWARK_ARC_W).toBeGreaterThan(SHIELD_ARC_W);
+    expect(BULWARK_MID_ALPHA).toBeGreaterThan(SHELL_MID_ALPHA);
+    expect(BULWARK_RIM_ALPHA).toBeGreaterThan(SHELL_RIM_ALPHA);
+    // Lower is faster: BULWARK's ring turns in less time.
+    expect(BULWARK_SPIN_MS).toBeLessThan(SHELL_SPIN_MS);
+  });
+
+  it('keeps the shell transparent where the hull is drawn', () => {
+    // A legibility rule, not an aesthetic one. The gradient is clear out to
+    // SHELL_CLEAR_R of the radius; the hull occupies AVATAR_HULL_D. If the ramp
+    // started inside the hull it would tint the ship — and anything that makes
+    // the player's own position harder to read is wrong however good it looks.
+    const hullFracOfRadius = AVATAR_HULL_D / SHIELD_RING;
+    expect(SHELL_CLEAR_R).toBeGreaterThanOrEqual(hullFracOfRadius * 0.9);
   });
 
   it('keeps the hurtbox the size it always was, only better placed', () => {
@@ -207,9 +256,25 @@ describe('boss HP formulas', () => {
   });
 
   it('giant boss HP grows linearly with wave and outpaces the mini', () => {
-    expect(BOSS_GIANT_HP(10)).toBe(220 + 340);
+    expect(BOSS_GIANT_HP(10)).toBe(150 + 200);
     for (const w of [10, 20, 50]) {
       expect(BOSS_GIANT_HP(w)).toBeGreaterThan(BOSS_MINI_HP(w));
+    }
+  });
+
+  // The giant used to be 220 + 34w, which at the damage an upgraded ship
+  // actually deals ran 1.5-3 minutes of the SAME five phases - long past the
+  // point where each one has shown what it asks for. Length is bounded here
+  // rather than in a comment so re-inflating the curve fails loudly.
+  it('a giant dies inside an arcade-length fight for an upgraded ship', () => {
+    // ~4x the zero-upgrade floor of 3 dmg/s: a player who has spent coins on
+    // damage and fire rate and is running a double gun.
+    const UPGRADED_DPS = 12;
+    // Giants hold every 10th wave.
+    for (const w of [10, 20, 30]) {
+      const seconds = BOSS_GIANT_HP(w) / UPGRADED_DPS;
+      expect(seconds).toBeGreaterThan(20); // still an ordeal, not a speed bump
+      expect(seconds).toBeLessThan(70); // ...but never a war of attrition
     }
   });
 });
@@ -294,6 +359,80 @@ describe('game data integrity', () => {
     expect(new Set(specials).size).toBe(specials.length);
   });
 
+});
+
+/**
+ * The FIRE button is per-ship now, and the table behind it is exactly the kind
+ * of thing that rots when a sixth hull lands. Record<SpecialKind, SpecialDef>
+ * makes a MISSING entry a compile error; these cover what the type cannot —
+ * that the entries are distinct, honest about the colour the ability arrives
+ * in, and still readable once they are sitting on the button.
+ */
+describe('the special identity table', () => {
+  const KINDS = Object.keys(SPECIALS) as SpecialKind[];
+  // The same floors theme.test.ts uses, read off the same helper, so this
+  // cannot drift from the contrast rule the rest of the app is held to.
+  const AA = 4.5;
+  const AA_LARGE = 3;
+
+  /** Flatten an rgba() layer onto an opaque hex, the way the screen does. */
+  const composite = (over: string, under: string): string => {
+    const m = over.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)\)/);
+    if (!m) throw new Error(`not an rgba value: ${over}`);
+    const [r, g, b, a] = m.slice(1).map(Number);
+    const u = [1, 3, 5].map((i) => parseInt(under.slice(i, i + 2), 16));
+    const mix = [r, g, b].map((c, i) => Math.round(c * a + u[i] * (1 - a)));
+    return `#${mix.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+  };
+
+  it('gives every ultimate its own glyph', () => {
+    // Two abilities wearing one mark is worse than no mark: the button would
+    // change between hulls while telling the player nothing true.
+    const icons = KINDS.map((k) => SPECIALS[k].icon);
+    expect(icons).toHaveLength(KINDS.length);
+    expect(new Set(icons).size).toBe(icons.length);
+    // Namespaced, so an ultimate can never quietly borrow a boon's glyph —
+    // 'shield' is a pickup, 'sp-bulwark' is an ability.
+    for (const icon of icons) expect(icon).toMatch(/^sp-/);
+  });
+
+  it('gives every ultimate its own accent', () => {
+    const accents = KINDS.map((k) => SPECIALS[k].accent);
+    expect(new Set(accents).size).toBe(accents.length);
+    for (const a of accents) expect(a).toMatch(/^#[0-9A-Fa-f]{6}$/);
+  });
+
+  it('wears the same colour as the hull that carries it', () => {
+    // The accent drives the armed rim and the full meter; the hull's shot tint
+    // is what its bolts — and, for talons and spears, the ability itself — are
+    // actually drawn in. The two being ONE value is the whole guarantee that
+    // the button cannot promise a colour the ability does not deliver. They
+    // were independent literals before the table existed.
+    for (const a of AVATARS) {
+      expect(a.shot.tint).toBe(SPECIALS[a.special].accent);
+    }
+  });
+
+  it('keeps every accent legible as a rim against the sky behind it', () => {
+    // The armed rim is a UI boundary drawn over the playfield, so it is held to
+    // AA_LARGE — the same floor theme.test.ts applies to `threat` over a panel.
+    // A pastel accent would arm the button invisibly.
+    for (const k of KINDS) {
+      expect(contrast(SPECIALS[k].accent, PALETTE.void)).toBeGreaterThanOrEqual(AA_LARGE);
+    }
+  });
+
+  it('keeps the glyph readable once the meter has filled behind it', () => {
+    // The failure this exists for: the fill now ENDS on the accent, and white
+    // ink on Nova's gold is about 1.5:1. The dark disc under the glyph is what
+    // buys that back — so the contrast that matters is ink against the scrim
+    // COMPOSITED OVER the accent, not against the accent alone. Anyone who
+    // removes the disc or picks a pale accent fails here.
+    for (const k of KINDS) {
+      const behind = composite(SPECIAL_GLYPH_SCRIM, SPECIALS[k].accent);
+      expect(contrast(PALETTE.ink, behind)).toBeGreaterThanOrEqual(AA);
+    }
+  });
 });
 
 describe('special ability cost', () => {
@@ -607,5 +746,46 @@ describe('planets read as being IN space', () => {
       const drawn = Math.max(1, Math.min(deepest, tier.bgLayers));
       if (drawn < deepest) expect(tier.planets).toBe(false);
     }
+  });
+});
+
+/**
+ * A gun drop must not read as enemy fire.
+ *
+ * These are the same KIND of object — both are projectile art on a dark sky —
+ * so size is most of what separates them, and the numbers live in two blocks
+ * hundreds of lines apart that know nothing about each other. At GIFT_ICON 48
+ * a drop was 1.4x an enemy bullet, which is not a call you can make at falling
+ * speed with a wave on screen.
+ */
+describe('a gun drop reads apart from an enemy shot', () => {
+  /** What an enemy bullet actually covers on screen. */
+  const enemyShot = ENEMY_BULLET_SIZE * ENEMY_BULLET_ART_SCALE;
+
+  it('is clearly larger than an enemy bullet', () => {
+    expect(GIFT_ICON).toBeGreaterThanOrEqual(enemyShot * 1.8);
+  });
+
+  it('is larger than a boss shot too', () => {
+    // Boss fans are the densest fire in the game and the worst place to mistake
+    // a reward for a projectile.
+    expect(GIFT_ICON).toBeGreaterThan(BOSS_SHOT * ENEMY_BULLET_ART_SCALE);
+  });
+
+  it('carries a halo wider than the art inside it', () => {
+    // The second half of the fix, and the half the laser drop depends on: its
+    // thickness is bound by its source aspect, so the glow is what makes it
+    // unmistakable. If the art ever outgrew the halo the sprite would poke out
+    // of its own light, which is the "pasted on" read the halo exists to stop.
+    expect(GUN_DROP_VIS).toBeGreaterThan(GIFT_ICON);
+    // An enemy bullet has no glow at all, so the pool of light is itself a tell.
+    expect(GUN_DROP_VIS).toBeGreaterThan(enemyShot * 2);
+  });
+
+  it('keeps the two bolts of a double drop inside their own box', () => {
+    // They are positioned from the footprint's centre, so a gap wide enough to
+    // push one off the edge would clip it against nothing.
+    expect(GIFT_DOUBLE_GAP * 2).toBeLessThan(GUN_DROP_VIS);
+    expect(GIFT_SHOT_LEN).toBeLessThanOrEqual(GUN_DROP_VIS);
   });
 });

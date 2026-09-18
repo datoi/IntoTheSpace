@@ -1,6 +1,14 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { SOUND_NAMES, systemSemitones, pickupSemitones, type SystemEvent, type PickupKind } from '../sounds';
+import {
+  SOUND_NAMES,
+  systemSemitones,
+  pickupSemitones,
+  blockSemitones,
+  type SystemEvent,
+  type PickupKind,
+} from '../sounds';
+import { SHIELD_HITS } from '../constants';
 
 /**
  * Guards the design invariants of the generated sound board, measured from the
@@ -227,5 +235,48 @@ describe('playback transposition', () => {
       expect(rate).toBeGreaterThanOrEqual(0.5);
       expect(rate).toBeLessThanOrEqual(2);
     }
+  });
+});
+
+/**
+ * The shield's block ladder.
+ *
+ * The shell draws its remaining charges as discrete arcs, but during a dense
+ * pattern the player is watching the bullets, not their own hull. So the same
+ * information is routed to the ear: each spent charge drops the block a whole
+ * tone, and the last block before a shatter is the lowest sound the shell
+ * makes. Falling, because a shield weakening is not a gain — the same rule the
+ * rest of this file asserts for defensive voices.
+ */
+describe('the shield block falls a step per charge spent', () => {
+  it('answers at pitch while the shield is untouched', () => {
+    expect(blockSemitones(SHIELD_HITS, SHIELD_HITS)).toBe(0);
+  });
+
+  it('drops monotonically as charges are spent', () => {
+    const ladder = Array.from({ length: SHIELD_HITS + 1 }, (_, spent) =>
+      blockSemitones(SHIELD_HITS - spent, SHIELD_HITS)
+    );
+    for (let i = 1; i < ladder.length; i++) {
+      expect(ladder[i]).toBeLessThan(ladder[i - 1]);
+    }
+    // The last charge is the deepest the shell ever sounds.
+    expect(ladder[ladder.length - 1]).toBe(Math.min(...ladder));
+  });
+
+  it('stays inside the rate range expo-audio supports, at every charge', () => {
+    for (let left = 0; left <= SHIELD_HITS; left++) {
+      const rate = Math.pow(2, (systemSemitones('block') + blockSemitones(left, SHIELD_HITS)) / 12);
+      expect(rate).toBeGreaterThanOrEqual(0.5);
+      expect(rate).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it('cannot be pushed out of range by a nonsense charge count', () => {
+    // BULWARK absorbs without spending a shield charge and calls this with a
+    // full budget; a resumed pre-budget snapshot can call it with -1. Neither
+    // may produce a playback rate the audio engine rejects.
+    expect(blockSemitones(999, SHIELD_HITS)).toBe(0);
+    expect(blockSemitones(-5, SHIELD_HITS)).toBe(blockSemitones(0, SHIELD_HITS));
   });
 });

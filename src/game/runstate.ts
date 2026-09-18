@@ -39,6 +39,7 @@ export function freshRunState(stats: ShipStats = BASE_SHIP_STATS): GameState {
     bulwarkTime: 0,
     bulwarkLeft: 0,
     shieldLeft: 0,
+    shieldBreakT: 0,
     phantomTime: 0,
     talonTime: 0,
     talonTimer: 0,

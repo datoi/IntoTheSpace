@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react-native';
 import { MenuScreen, GameOverScreen, ShopScreen } from '../Screens';
 import { SaveData, DEFAULT_SAVE } from '../../game/storage';
 import { RunResult } from '../../game/types';
-import { AVATARS } from '../../game/constants';
+import { AVATARS, PALETTE, COIN_GOLD_EDGE } from '../../game/constants';
 import { ThemeProvider } from '../../components/Theme';
 import { chromeFor } from '../../game/theme';
 
@@ -364,5 +364,96 @@ describe('PickupGuide (menu overlay)', () => {
     await fireEvent.press(screen.getByText('GOT IT'));
     expect(screen.getAllByText('PICK-UPS').length).toBe(1);
     expect(screen.getByText('LIFT OFF')).toBeTruthy();
+  });
+});
+
+/**
+ * The shell follows the sky — borders included.
+ *
+ * The bug this guards: every *ordinary* border already read `c.edge` and moved
+ * correctly, but the borders a player actually notices — the selected shop row,
+ * the active tab, the equipped pill, the hull picker's current chip — were
+ * still painted with raw `PALETTE.plasma`. So the subtle dark borders shifted
+ * hue and the prominent bright ones did not, which reads as "the theme doesn't
+ * change the borders".
+ *
+ * theme.ts already drew the line these tests encode: `plasma` is the PLAYER —
+ * their hull, their bullets, their shield — and never moves, while `accent` is
+ * the chrome's own bright colour and only ever appears on shell furniture. A
+ * selected shop row is furniture.
+ */
+describe('shell furniture follows the sky', () => {
+  const themedSave: SaveData = {
+    ...DEFAULT_SAVE,
+    likes: 9999,
+    unlocked: ['ironclad', 'specter'],
+    selectedAvatar: 'specter',
+  };
+
+  /** Every distinct borderColor currently on screen. */
+  const borderColours = (): string[] => {
+    const out: string[] = [];
+    const walk = (n: any) => {
+      if (!n || typeof n !== 'object') return;
+      const st = flatten(n.props?.style);
+      if (st.borderColor) out.push(String(st.borderColor));
+      (n.children ?? []).forEach(walk);
+    };
+    walk(screen.toJSON());
+    return [...new Set(out)];
+  };
+
+  const shopUnder = (bg: string) => (
+    <ThemeProvider backgroundId={bg}>
+      <ShopScreen
+        save={themedSave}
+        onBuyAvatar={jest.fn()}
+        onSelectAvatar={jest.fn()}
+        onBuyBackground={jest.fn()}
+        onSelectBackground={jest.fn()}
+        onBack={jest.fn()}
+      />
+    </ThemeProvider>
+  );
+
+  it('repaints the shop edge AND its selected-row border when the sky changes', async () => {
+    await render(shopUnder('jade'));
+    const jade = borderColours();
+    await screen.rerender(shopUnder('ember'));
+    const ember = borderColours();
+
+    // The quiet border moved…
+    expect(jade).toContain(chromeFor('jade').edge);
+    expect(ember).toContain(chromeFor('ember').edge);
+    // …and so did the loud one, which is the half that was broken.
+    expect(jade).toContain(chromeFor('jade').accent);
+    expect(ember).toContain(chromeFor('ember').accent);
+  });
+
+  it.each(['violet', 'jade', 'ember', 'rosette'])(
+    'draws no border in the player colour under %s',
+    async (bg) => {
+      // The precise regression: a BORDER is chrome, so none of them may be
+      // `plasma` once a sky is equipped.
+      //
+      // Deliberately scoped to borders rather than to the whole tree. Ironclad's
+      // tier stripe and its BULWARK label are genuinely `plasma` here and must
+      // stay that way — that stripe is the same colour as its shot and its
+      // shell in flight, which is the entire reason the shop draws it. The rule
+      // is not "plasma never appears in the shell", it is "plasma is the SHIP's
+      // colour and never furniture".
+      await render(shopUnder(bg));
+      expect(borderColours()).not.toContain(PALETTE.plasma);
+    }
+  );
+
+  it('leaves the reward colour alone', async () => {
+    // Gold is semantic, not furniture: a coin is a coin under every sky. It is
+    // the one colour on this screen that SHOULD be identical across themes.
+    await render(shopUnder('jade'));
+    const jade = borderColours().filter((b) => b === COIN_GOLD_EDGE);
+    await screen.rerender(shopUnder('rosette'));
+    expect(borderColours().filter((b) => b === COIN_GOLD_EDGE)).toEqual(jade);
+    expect(jade.length).toBeGreaterThan(0);
   });
 });

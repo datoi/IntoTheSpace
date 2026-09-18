@@ -254,6 +254,20 @@ describe('the accent', () => {
     expect(contrast(c.accent, c.hull)).toBeGreaterThanOrEqual(AA);
   });
 
+  it('carries a glow that follows it', () => {
+    // The menu's hull pedestal is lit by this. It was a fixed translucent cyan,
+    // which is the one thing in a rose-lit room that refuses to belong to it.
+    expect(DEFAULT_CHROME.accentGlow).toBe(PALETTE.plasmaGlow);
+    for (const bg of BACKGROUNDS) {
+      const c = chromeFor(bg.id);
+      expect(c.accentGlow).not.toBe(PALETTE.plasmaGlow);
+      // …and it is the accent itself at alpha, not some other hue that happens
+      // to be nearby. withAlpha packs to rgba(), so compare channels.
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(c.accent.slice(i, i + 2), 16));
+      expect(c.accentGlow).toBe(`rgba(${r},${g},${b},0.35)`);
+    }
+  });
+
   it('is the shipped brand colour under the default chrome', () => {
     // Equipping nothing has to look exactly like the build did before theming.
     expect(DEFAULT_CHROME.accent).toBe(PALETTE.plasma);

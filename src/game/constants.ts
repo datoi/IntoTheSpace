@@ -91,7 +91,6 @@ export const ALT_RATE_MIN = 120; // m/s at liftoff (climb faster → full burn s
 export const ALT_RATE_MAX = 300; // m/s at full burn
 
 // --- Obstacles (small, compact shapes; visuals slightly larger than hitboxes) ---
-export const OB_EMOJI = 34; // font size for 😡 / ⛽
 export const OB_VIS = 50; // visual footprint (glow ring) of emoji obstacles
 export const OB_HIT = 36; // collision box — forgiving: smaller than the visual
 
@@ -439,18 +438,221 @@ export const HEART_ICON = 28; // glyph size inside the OB_VIS ring
 
 // --- Utility pickups (boons) --------------------------------------------------
 export const BOON_EVERY = 13; // s between utility-pickup drops
-export const BOON_VIS = 44; // rendered badge diameter
 export const BOON_EMOJI = 24; // glyph size on the badge
+
+// --- Pickups: one system for all four drop types -----------------------------
+//
+// Boons, coins, hearts and gun drops used to be three sizes, two glow systems
+// and one type with no glow at all — so the screen read as assembled rather
+// than designed. They now share a footprint, a halo, an idle behaviour and a
+// collection moment, and differ only where differing carries meaning.
+//
+// SHAPE IS A CHANNEL. Fourteen boons used to share ONE silhouette and six
+// colours, which meant colour was carrying information it cannot carry: amber
+// alone covers four boons. Roughly 70% of how fast a thing reads comes from
+// its silhouette, so the class now has its own shape and colour is demoted to
+// what it is good at — family. Three independent channels (shape / colour /
+// glyph) is what makes fourteen boons legible at falling speed, and it is also
+// what makes them legible to a colourblind player, who keeps two of the three.
+//
+//   CAPSULE   a timed boon. Upright, with a visible charge level: it holds
+//             something that will run out.
+//   CRYSTAL   an instant effect (instant boons AND hearts). Faceted, tumbling,
+//             no reservoir: it resolves the moment you touch it.
+//   DISC      currency. Coins keep the universal shape; nothing reads as money
+//             faster and nothing needed fixing.
+//   NONE      a gun drop. The only class with no container at all — its own art
+//             in its own light, and nothing around it. See the GUN_GLOW block
+//             below for why "uncontained" beat the corner brackets that used to
+//             sit here.
+export const PICKUP_VIS = 48; // shared footprint for every drop type
+
+// Capsule geometry, inside PICKUP_VIS.
+export const CAPSULE_W = 26;
+export const CAPSULE_H = 36;
+/** How much of the capsule the charge fills. Decorative — a drop is always full. */
+export const CAPSULE_FILL = 0.55;
+
+/** Crystal radius, point to centre. */
+export const CRYSTAL_R = 21;
+
+// --- Gun drops: uncontained ---------------------------------------------------
+//
+// A gun drop used to wear four gold corner brackets. They were meant to say
+// "fabricated hardware" beside a capsule of contained energy, and instead they
+// said "card": four corners are the strongest closure cue there is, so the eye
+// fills in the rectangle between them whether or not anything is drawn in it.
+// Sitting inside that implied rectangle was a flat gold disc at 12% — a
+// CONSTANT-alpha fill, so a hard edge — which does not darken the nebula but
+// does flatten it to a warm grey. Flat patch plus implied frame reads as a
+// sticker pasted on the sky.
+//
+// So the weapon tell is now the ABSENCE of a container, and that is a stronger
+// signal than any frame because it is a category difference rather than one
+// more shape in the same family:
+//
+//   contained  a boon — capsule or crystal. Something holds it.
+//   minted     a coin — a struck disc.
+//   free       a gun drop. Raw ordnance, glowing, with nothing around it.
+//
+// Shape still carries the class, the gun's own art still carries which gun, and
+// colour is now the gun's own emission rather than a shared gold — so a
+// colourblind player still keeps shape and glyph.
+
+/**
+ * Each gun's emission colour, sampled from its own art.
+ *
+ * Chroma-weighted means over the bright pixels of the shipped PNGs, the same
+ * way the background chrome hues were measured — the colour the eye actually
+ * reads as the thing's light, not a designer's guess at it.
+ *
+ * This replaces a shared `gold` halo, which was wrong twice over: it collided
+ * with the coin, which is the one drop that should own gold, and it put a gold
+ * glow around a cyan beam. A glow has to be the light of the thing it belongs
+ * to or the two read as separate objects.
+ *
+ * `double` is absent on purpose — that drop wears the player's OWN bolt, so its
+ * glow comes from `ShotArt.tint` at runtime and follows the equipped hull.
+ */
+export const GUN_GLOW: Partial<Record<GunKind, string>> = {
+  bomb: '#DB6B06',
+  laser: '#09BDD9',
+  homing: '#66C300',
+};
+
+/**
+ * The gun drop's halo, which now carries the whole read on its own.
+ *
+ * Wider and slightly denser than the shared PICKUP_HALO_* values because there
+ * is no longer a frame or a fill to help it: with the brackets gone, the glow
+ * IS the pickup. Still a ramp with no hard edge anywhere — that is the whole
+ * point, and it is the same lesson the energy shells and the boon halo already
+ * learned.
+ */
+export const GUN_HALO_R = 0.56; // fraction of PICKUP_VIS, vs PICKUP_HALO_R
+export const GUN_HALO_ALPHA = 0.46; // vs PICKUP_HALO_ALPHA
+export const GUN_HALO_CORE = 0.12; // starts closer in, so the core reads as lit
+
+// The halo every drop wears. Same reasoning as the energy shells: opacity that
+// RAMPS outward reads as a lit volume, where a constant-alpha disc reads as a
+// sticker. Coins are the exception and take a cheaper two-layer View glow —
+// a boss payout puts up to BOSS_GIANT_COINS of them on screen in one frame,
+// which is exactly the worst moment to be mounting fourteen gradients.
+export const PICKUP_HALO_R = 0.5; // fraction of PICKUP_VIS
+export const PICKUP_HALO_ALPHA = 0.34;
+export const PICKUP_HALO_CORE = 0.28; // gradient offset where the halo starts
+
+// --- Idle motion -------------------------------------------------------------
+//
+// ONE looping value drives every pickup on screen, and each one reads it
+// through a pre-built phase bucket picked by `id % PICKUP_PHASES` — so they
+// never bob in lockstep and no pickup owns an animation, an interpolation or a
+// timer of its own. The nodes are built once; a pickup only ever references them.
+//
+// Amplitudes are deliberately small. A drop has to read as ALIVE without ever
+// being mistaken for an enemy or a bullet, and the things on this board that
+// want the player's attention move fast and straight. Anything floating,
+// slow and small is unambiguously not a threat.
+export const PICKUP_CYCLE_MS = 3200; // one full turn of the shared loop
+export const PICKUP_PHASES = 8; // distinct phase buckets
+export const PICKUP_BOB_PX = 3.5; // vertical, against the fall
+export const PICKUP_SWAY_PX = 2.5; // lateral, at a different rate so it wanders
+export const PICKUP_HALO_PULSE = 0.16; // ± scale on the halo
+export const PICKUP_SPIN_DEG = 360; // a crystal's tumble, per cycle
+
+// --- Falling -----------------------------------------------------------------
+//
+// Pickups used to spawn on one of LANES fixed columns and fall dead straight at
+// an identical speed, which is why they read as sliding down invisible rails.
+// Nothing in a vacuum moves like that. Spawn x is continuous now, fall speed
+// varies per drop, and each one drifts sideways on its own phase — all three
+// derived from the card id, so none of it costs a byte of state or an
+// allocation per frame.
+export const PICKUP_SPEED_VAR = 0.15; // ± fraction of PICKUP_FALL_SCALE
+export const PICKUP_DRIFT_PX = 9; // lateral travel either side of the spawn column
+export const PICKUP_DRIFT_FREQ = 0.55; // rad/s
+export const PICKUP_DRIFT_SEED = 0.7; // phase spread per id, so no two drift together
+
+// --- The collection moment ---------------------------------------------------
+//
+// Taking a reward used to look exactly like killing a drone: both ran the same
+// 0.18s scale-and-fade. A pickup now snaps harder and faster and leaves a ring
+// behind, and the burst fires at the DROP rather than at the ship — which is
+// where the player is looking at the moment it lands.
+export const PICKUP_POP_SCALE = 1.7; // vs the enemy pop's 1.45
+export const PICKUP_RING_SCALE = 2.6; // how far the collect ring expands
+export const PICKUP_RING_W = 2.5;
+/** Fraction of the death window the ring is visible for — a flash, not a fade. */
+export const PICKUP_RING_FRAC = 0.55;
 // Active-boon chips are listed on the HUD under the gun readout.
 export const BOON_CHIP_MAX = 4; // most chips shown at once (oldest drop off)
-// The shield's visible bubble around the hull.
+// --- Energy shells ----------------------------------------------------------
 //
-// Must CLEAR the drawn hull (AVATAR_HULL_D ≈ 81px). It was 78 — narrower than
-// the ship it was supposed to be containing — so the wingtips sat outside the
-// hoop even once the centring was fixed. Kept under BULWARK_RING so the shell
-// still reads as the heavier of the two. Guarded by a test, because the two
-// numbers are declared hundreds of lines apart and neither knows about the other.
-export const SHIELD_RING = 92;
+// Two things in the game wrap the hull in a protective volume: the SHIELD boon
+// and Ironclad's BULWARK. They are one primitive with two strengths (see
+// components/EnergyShell.tsx), so their shared geometry lives here together.
+//
+// WHY A GRADIENT AND NOT A STROKE. Both used to be a `<View>` with a border: a
+// constant-width, constant-alpha outline. That is a CONTOUR, and a contour is
+// the visual language of a selection ring — which is why the shield read as UI
+// sitting on top of the ship rather than as a field around it. A transparent
+// sphere does the opposite: there is more material along the line of sight at
+// the silhouette than through the middle, so opacity RAMPS toward the rim.
+// That ramp is what a fresnel shader produces and what the eye reads as volume.
+// In a top-down 2D game there is no view angle, so a fixed radial ramp is not
+// an approximation of fresnel — it is the whole of it.
+//
+// The ramp is quoted as fractions of the RADIUS so both shells share it.
+
+/** Fully transparent out to here. The drawn hull sits inside it and is never tinted. */
+export const SHELL_CLEAR_R = 0.72;
+/** Where the body reaches its interior density. */
+export const SHELL_MID_R = 0.9;
+export const SHELL_MID_ALPHA = 0.1;
+export const SHELL_RIM_ALPHA = 0.5;
+/** A soft bloom drawn OUTSIDE the rim — the closest thing to a glow without post-processing. */
+export const SHELL_HALO_ALPHA = 0.18;
+export const SHELL_HALO_W = 6; // px the halo extends past the rim
+
+/** Gap between charge segments, as a fraction of one segment's arc. */
+export const SHELL_ARC_GAP = 0.17;
+/** A spent charge doesn't disappear — it goes inert, so the budget stays countable. */
+export const SHELL_ARC_SPENT_ALPHA = 0.14;
+
+// Motion. Deliberately slow: the shell has to read as alive without competing
+// with enemy fire for the player's attention. Both loops are native-driven and
+// both are dropped by the quality governor and by reduce-motion.
+export const SHELL_SPIN_MS = 9000; // one revolution of the charge ring
+export const SHELL_BREATHE_MS = 2400;
+export const SHELL_BREATHE = 0.03; // ± fraction of scale
+
+// Impact. The single most satisfying thing a shield can do is visibly EAT
+// something, so an absorbed hit puts a ripple on the shell AT THE CONTACT
+// POINT and briefly hardens the whole volume.
+export const SHELL_IMPACT_MS = 300;
+export const SHELL_IMPACT_DOT = 26; // ripple disc diameter before it scales
+export const SHELL_IMPACT_SCALE = 2.3;
+export const SHELL_HARDEN = 0.55; // extra body opacity at the moment of impact
+
+// The break. A shatter, not a fade: the charge ring flies outward FASTER than
+// the body, so the lattice visibly separates from the bubble before both go.
+export const SHELL_BREAK_MS = 380;
+export const SHELL_BREAK_BODY_SCALE = 1.25;
+export const SHELL_BREAK_RING_SCALE = 1.75;
+/** Seconds the shell survives past its last charge to play that break. */
+export const SHIELD_BREAK_TIME = SHELL_BREAK_MS / 1000;
+
+// The shield boon's diameter.
+//
+// Must CLEAR the drawn hull (AVATAR_HULL_D ≈ 81px). At 92 the clearance was
+// 5.4px a side and the 2.5px stroke ate most of it — a 2.9px gap, which is a
+// collar, not an envelope. 104 leaves 11.4px for the rim ramp to live in, which
+// is what lets it read as a volume the ship is INSIDE.
+//
+// Kept under BULWARK_RING so the shell still reads as the heavier of the two.
+// Guarded by a test, because the two numbers are declared hundreds of lines
+// apart and neither knows about the other.
+export const SHIELD_RING = 104;
 export const SHIELD_COLOR = PALETTE.plasma; // the player's own shield
 /**
  * How many hits a shield absorbs before it shatters.
@@ -630,11 +832,19 @@ export const BOSS_GIANT_HIT = 132;
  * player is never doing the same thing for more than a fifth of the bar, so the
  * length reads as an escalating fight rather than one long health bar.
  *
+ * That argument has a ceiling, and the giant was over it. Subdivision buys
+ * length only up to the point where a phase has said what it has to say: each
+ * of the five asks for one verb, and once the player has read that pattern and
+ * beaten it, the rest of the band is the same dodge repeated for score. The
+ * giant was running past that point by minutes, so its curve came down ~40%
+ * (220 + 34w to 150 + 20w) — the phases are untouched, they just stop
+ * outstaying themselves. The mini was already short enough to leave alone.
+ *
  * Rough fight lengths, at ~3 damage/second (single gun, ZERO upgrades — the
  * floor, not the expectation):
  *
- *   mini  w5  = 170 hp  ~57s        giant w10 = 560 hp  ~3m
- *   mini  w15 = 330 hp  ~110s       giant w20 = 900 hp  ~5m
+ *   mini  w5  = 170 hp  ~57s        giant w10 = 350 hp  ~2m
+ *   mini  w15 = 330 hp  ~110s       giant w20 = 550 hp  ~3m
  *
  * Those floor numbers are deliberately brutal. A player who has actually spent
  * their coins runs 4–8× that damage (dmgMult stacks with fireIntervalMult, and
@@ -642,7 +852,7 @@ export const BOSS_GIANT_HIT = 132;
  * minute. That gap IS the design: upgrades are what a boss measures.
  */
 export const BOSS_MINI_HP = (wave: number) => 90 + wave * 16;
-export const BOSS_GIANT_HP = (wave: number) => 220 + wave * 34;
+export const BOSS_GIANT_HP = (wave: number) => 150 + wave * 20;
 // Baseline sway. Each boss phase scales these — see BOSS_PHASES in bosses.ts.
 export const BOSS_SWAY_AMP = 0.3; // fraction of screen width the boss sways from center
 export const BOSS_SWAY_FREQ = 0.7; // rad/s
@@ -1284,8 +1494,42 @@ export const GUN_ICON: Record<GunKind, IconName> = {
   laser: 'gun-laser',
   homing: 'gun-homing',
 };
-export const GIFT_ICON = 48; // rendered size of a gun-drop sprite (large so you can read the gun before grabbing)
-export const GIFT_SHOT_LEN = 40; // length of each shot in the doubled 'double' pickup icon
+/**
+ * Rendered size of a gun-drop sprite.
+ *
+ * Bigger than the shared PICKUP_VIS footprint, on purpose, and this is a
+ * READABILITY number rather than a taste one. A gun drop and an enemy shot are
+ * the same kind of object — both are projectile art — so size is most of what
+ * separates them, and at 48 there was not enough of it:
+ *
+ *   enemy bullet   ~32x32   (ENEMY_BULLET_SIZE x ENEMY_BULLET_ART_SCALE)
+ *   boss shot      ~41x41
+ *   gun drop       45-48 on its long axis
+ *
+ * That is 1.4x an enemy bullet, which is not a difference you can call at
+ * falling speed with a wave on screen. At 64 the drop is twice a bullet and
+ * half again a boss shot.
+ *
+ * The LASER drop benefits least and it is worth knowing why: its source art is
+ * 229x95, so `contain` fits the long axis and its thickness is aspect-bound —
+ * 48 gave it 20px of beam, thinner than an enemy bullet, and 64 gives it 27.
+ * Matching a bullet's 32px of thickness would need a ~78px box, which is a very
+ * large drop for a 36px hitbox. The halo below is what closes that gap instead.
+ */
+export const GIFT_ICON = 64;
+/**
+ * The gun drop's halo box — the art plus a margin for the glow to live in.
+ *
+ * Has to exceed GIFT_ICON or the sprite pokes out of its own light, which is
+ * exactly the "pasted on" read the halo exists to prevent. This is also the
+ * second half of the enemy-shot fix: an enemy bullet has no glow around it at
+ * all, so a 76px pool of coloured light is a tell that survives even on the
+ * laser, whose own silhouette stays thin.
+ */
+export const GUN_DROP_VIS = 76;
+export const GIFT_SHOT_LEN = 52; // length of each shot in the doubled 'double' pickup icon
+/** Gap either side of centre for the two bolts in a `double` drop. */
+export const GIFT_DOUBLE_GAP = 13;
 
 // --- Coins: the only currency. Collected in flight, spent on ships. ---
 export const COIN_EVERY = 6; // s between coin drops
@@ -1401,15 +1645,53 @@ export const SPECIAL_BTN_SIZE = 76; // diameter of the on-screen FIRE button
 export const SPECIAL_BTN_RIGHT = 18; // px from the right edge
 export const SPECIAL_BTN_BOTTOM = 88; // px from the bottom — under the ship's rest spot, in thumb reach
 // The meter reads as a vessel filling with charged coolant: it pours in white
-// and deepens to a shiny blue as it comes up to full, so the colour alone tells
-// you roughly how close you are without reading the level. Interpolated across
-// three stops rather than two — a straight white→blue blend passes through a
-// washed-out grey-blue in the middle, and the pale mid stop keeps it bright.
+// and deepens to the SPECIAL'S OWN colour as it comes up to full, so a full
+// button is already wearing the colour the ability will arrive in.
+//
+// This used to end at a fixed deep blue (#1E88FF) through a pale blue mid stop,
+// because a straight white→#1E88FF blend passed through a washed-out grey-blue.
+// Every accent is BRIGHT (see SPECIALS), so white→accent is a short blend with
+// no muddy middle and the third stop stopped earning its place. The cost is
+// honest: a bright full-fill is a slightly weaker "how close am I" cue than a
+// deep one, which is why the armed state also thickens the rim, brings up the
+// glyph and names the attack rather than relying on the fill alone.
 export const SPECIAL_FILL_EMPTY = '#FFFFFF';
-export const SPECIAL_FILL_MID = '#7FC4FF';
-export const SPECIAL_FILL_FULL = '#1E88FF';
-export const SPECIAL_READY_EDGE = '#5AB9FF'; // rim once it's armed
 export const SPECIAL_SURFACE = 'rgba(255,255,255,0.9)'; // bright line riding the top of the fill
+
+// --- The glyph on the FIRE button ------------------------------------------
+//
+// The button carries the SPECIAL'S mark instead of the word FIRE. At 76px a
+// 34px glyph is unmistakable and needs no language, and FIRE was redundant on
+// a round button in the thumb corner that gets tapped all run — while the one
+// piece of text that does carry information, the attack's NAME, only appears
+// once the thing is armed.
+export const SPECIAL_GLYPH_SIZE = 34;
+/**
+ * A dark disc behind the glyph, so it survives any accent under it.
+ *
+ * The fill slides up THROUGH the glyph, and at full it is the ability's own
+ * colour — white ink on Nova's gold is about 1.5:1, which is unreadable. The
+ * alternative is animating the glyph between a light and a dark ink as the
+ * meter passes it, which would put a colour on the React render path for
+ * something the game loop drives sixty times a second. One static disc costs
+ * a single view, never re-renders, and holds for every accent including ones
+ * nobody has picked yet.
+ */
+export const SPECIAL_GLYPH_SCRIM = 'rgba(5,7,14,0.62)'; // PALETTE.void, semi-opaque
+export const SPECIAL_GLYPH_DISC = 46; // diameter of that disc
+// Charging reads as dim, armed reads as lit. A brightness step rather than a
+// hue step, so it survives colourblindness and a dark phone at full sun.
+export const SPECIAL_GLYPH_DIM = 0.5;
+/**
+ * The second rim that marks an OVERCHARGED button.
+ *
+ * Armed and overcharged used to differ by hue (blue→gold) and half a pixel of
+ * border. Half a pixel is not a signal, and hue alone is not one either for a
+ * colourblind player reading this mid-fight — so overcharge also changes the
+ * button's SHAPE, by drawing a second ring inside the first.
+ */
+export const SPECIAL_OVER_RING_INSET = 5; // px in from the rim
+export const SPECIAL_OVER_RING_W = 1.5;
 
 // Specter — PHANTOMS: two spectral copies of your hull fade in on either side
 // and fire whatever you're firing, then dissolve. Triples your output while
@@ -1418,6 +1700,15 @@ export const PHANTOM_TIME = 7; // s the ghosts fly with you
 export const PHANTOM_OFFSET = 48; // px each ghost flanks the hull
 export const PHANTOM_ALPHA = 0.45; // ghosts read as see-through, never as a second real ship
 export const PHANTOM_TINT = '#BFC9FF'; // pale spectral blue-white for the summon burst
+/**
+ * PHANTOMS' identity colour — see SPECIALS.
+ *
+ * NOT PHANTOM_TINT. That is the half-second flash the ghosts arrive in; this
+ * is the teal their bolts fly in for the seven seconds afterwards, which is
+ * what the player actually watches. The button has to promise the colour the
+ * ability spends its time being, not the one it opens on.
+ */
+export const PHANTOM_ACCENT = '#3DE0C0';
 
 // Raptor — TALONS: a bird-of-prey rake. A fan of piercing claws goes out every
 // TALON_BURST_EVERY for TALON_BURST_TIME, and the whole fan swings side to side
@@ -1548,19 +1839,15 @@ export const SPEAR_SPEED_VAR = 0.35; // ± fraction of random fall-speed variati
 // the fastest spear already covers 63px against a 92px swept body, and a steeper
 // lean would start letting tips slip past a hitbox between frames.
 export const SPEAR_TILT = 0.2;
+/**
+ * SPEAR RAIN's identity colour — see SPECIALS.
+ *
+ * The spears are the hull's own bolt stretched into a lance (see SPEAR_LEN),
+ * so the ability has no colour of its own: this IS Valkyrie's shot tint, and
+ * AVATARS reads it from here so the two cannot drift.
+ */
+export const SPEAR_ACCENT = '#5BB0FF';
 
-export interface SpecialDef {
-  name: string; // shouted on the HUD when it fires, and listed in the shop
-  desc: string; // one-line shop blurb: what the coins actually buy
-}
-
-export const SPECIALS: Record<SpecialKind, SpecialDef> = {
-  bulwark: { name: 'BULWARK', desc: 'A hard shell eats every shot — and fires each one back.' },
-  phantom: { name: 'PHANTOMS', desc: 'Two ghost wingmen fade in and fire beside you.' },
-  talons: { name: 'TALONS', desc: 'A machine-gun rake of piercing claws, sprayed wide.' },
-  nova: { name: 'NOVA BURST', desc: 'A shockwave ring that blasts and clears enemy fire.' },
-  spears: { name: 'SPEAR RAIN', desc: 'A spear of light drops onto every enemy on screen.' },
-};
 
 // Ironclad — BULWARK: a shell snaps around the hull, absorbs everything it is
 // hit by, and throws each absorbed shot back as your own. Teaches the FIRE
@@ -1568,15 +1855,101 @@ export const SPECIALS: Record<SpecialKind, SpecialDef> = {
 // — which is exactly the behaviour the graze system pays for.
 export const BULWARK_TIME = 4; // s the shell holds
 export const BULWARK_TIME_OVER = 6.5; // s when fired overcharged
-export const BULWARK_RING = 96; // rendered diameter
+// Rendered diameter. Both shells grew together — see SHIELD_RING for why 92/96
+// were collars rather than envelopes — and BULWARK stays the wider of the two.
+export const BULWARK_RING = 112;
 export const BULWARK_COLOR = PALETTE.plasma;
-export const BULWARK_CORE = 'rgba(53,214,255,0.16)';
+
+// --- How BULWARK outranks the shield boon, visually --------------------------
+//
+// These two used to be the same View with 4px of diameter, 1px of stroke and
+// 6% of fill between them, at an IDENTICAL hue — so nothing told the player
+// that one absorbs three hits and the other absorbs everything and fires it
+// back. Sharing one primitive (components/EnergyShell.tsx) means the ranking is
+// now expressed as parameters on that primitive, and every one of them points
+// the same way: BULWARK is wider, denser, unbroken and faster.
+//
+// UNBROKEN is the important one. The boon's rim is SEGMENTED because its
+// segments ARE its three charges; BULWARK has no charge budget, so its rim is a
+// single continuous band. "Solid ring" vs "three arcs" is a read the player
+// gets at a glance and at any size, and it does not rely on colour at all.
+export const BULWARK_ARC_W = 4.5; // vs SHIELD_ARC_W
+export const BULWARK_MID_ALPHA = 0.2; // vs SHELL_MID_ALPHA — a denser interior
+export const BULWARK_RIM_ALPHA = 0.72; // vs SHELL_RIM_ALPHA
+export const BULWARK_SPIN_MS = 5200; // vs SHELL_SPIN_MS — visibly more energetic
+export const SHIELD_ARC_W = 2.5;
 // Damage of a reflected shot. Generous — the fantasy is turning a bullet wall
 // into your own volley — but capped per activation so a spiraller can't hand
 // the player a hundred free shots.
 export const BULWARK_REFLECT_DMG = 3;
 export const BULWARK_REFLECT_MAX = 24; // reflected shots per activation
 export const BULWARK_REFLECT_SPEED = 780;
+
+/**
+ * Everything that identifies one ultimate, in one place.
+ *
+ * `icon` and `accent` are here rather than on AvatarDef because they belong to
+ * the ABILITY, not to the hull that happens to carry it. A sixth ship sharing
+ * an existing special must inherit that special's symbol, or the player learns
+ * the mark twice.
+ *
+ * Being a Record<SpecialKind, …>, adding a member to the union fails to
+ * compile until its glyph and colour exist — which is the point. Both fields
+ * used to be implicit: the button said FIRE for every hull, and the identity
+ * colour lived only as a literal on AvatarDef.shot.tint.
+ */
+export interface SpecialDef {
+  name: string; // shouted on the HUD when it fires, and listed in the shop
+  desc: string; // one-line shop blurb: what the coins actually buy
+  /**
+   * The ability's mark. One symbol everywhere it appears — the FIRE button,
+   * the menu pedestal, the shop row — so the glyph on the button is the same
+   * thing the player read when they bought the hull.
+   */
+  icon: IconName;
+  /**
+   * The colour the ability actually ARRIVES IN on screen, which is also the
+   * hull's shot tint (constants.test.ts asserts the two match). It drives the
+   * armed rim and the full meter, so the button can never promise a colour the
+   * ability does not deliver.
+   */
+  accent: string;
+}
+
+export const SPECIALS: Record<SpecialKind, SpecialDef> = {
+  bulwark: {
+    name: 'BULWARK',
+    desc: 'A hard shell eats every shot — and fires each one back.',
+    icon: 'sp-bulwark',
+    accent: BULWARK_COLOR,
+  },
+  phantom: {
+    name: 'PHANTOMS',
+    desc: 'Two ghost wingmen fade in and fire beside you.',
+    icon: 'sp-phantom',
+    accent: PHANTOM_ACCENT,
+  },
+  talons: {
+    name: 'TALONS',
+    desc: 'A machine-gun rake of piercing claws, sprayed wide.',
+    icon: 'sp-talons',
+    // The claws are the hull's bolt restyled, so this is Raptor's violet.
+    accent: PALETTE.violet,
+  },
+  nova: {
+    name: 'NOVA BURST',
+    desc: 'A shockwave ring that blasts and clears enemy fire.',
+    icon: 'sp-nova',
+    // The ring, the core and the whiteout are all gold — see NOVA_CORE_COLOR.
+    accent: PALETTE.gold,
+  },
+  spears: {
+    name: 'SPEAR RAIN',
+    desc: 'A spear of light drops onto every enemy on screen.',
+    icon: 'sp-spears',
+    accent: SPEAR_ACCENT,
+  },
+};
 
 // --- Avatars: unlockable with coins ---
 export interface AvatarDef {
@@ -1600,7 +1973,9 @@ export interface AvatarDef {
 // recoloured here, in the art or at runtime. The per-hull `// pack N` comment
 // records which folder each came from, so the choice stays auditable and a hull
 // can be re-hued by copying a different folder rather than by editing pixels.
-// `tint` is UI only (shop tier edge, special label); it never touches the sprite.
+// `tint` is UI only (shop tier edge, special label, FIRE button); it never
+// touches the sprite. Each hull reads it from its own special's `accent`, so
+// the ship, its bolts and its ultimate cannot end up three different colours.
 //
 // Every hue is on the cool half of the wheel or gold. That is the friend/foe
 // rule, not a style choice: the crimson bolts belong to the enemy, so a red
@@ -1620,7 +1995,7 @@ export const AVATARS: AvatarDef[] = [
   {
     id: 'specter', name: 'Specter', price: 60,
     image: require('../../assets/avatars/pship2.png'),
-    shot: { src: require('../../assets/bullets/pshot2.png'), aspect: 63 / 165, tint: '#3DE0C0' }, // pack 8, teal #18E7B9
+    shot: { src: require('../../assets/bullets/pshot2.png'), aspect: 63 / 165, tint: PHANTOM_ACCENT }, // pack 8, teal #18E7B9
     special: 'phantom', // a specter haunts: ghosts of itself fly alongside
   },
   {
@@ -1632,7 +2007,7 @@ export const AVATARS: AvatarDef[] = [
   {
     id: 'valkyrie', name: 'Valkyrie', price: 300,
     image: require('../../assets/avatars/pship5.png'),
-    shot: { src: require('../../assets/bullets/pshot5.png'), aspect: 63 / 165, tint: '#5BB0FF' }, // pack 10, blue #319AF1
+    shot: { src: require('../../assets/bullets/pshot5.png'), aspect: 63 / 165, tint: SPEAR_ACCENT }, // pack 10, blue #319AF1
     special: 'spears', // a valkyrie descends from the sky, spear in hand
   },
   {

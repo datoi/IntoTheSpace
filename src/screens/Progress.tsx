@@ -31,7 +31,7 @@ import {
 import { FONTS } from '../game/type';
 import { playUi } from '../game/sounds';
 import CoinIcon from '../components/Coin';
-import { useThemedStyles } from '../components/Theme';
+import { useChrome, useThemedStyles } from '../components/Theme';
 import { Button } from '../components/Button';
 import Icon from '../components/Icon';
 
@@ -105,6 +105,10 @@ interface HangarProps {
 
 export function HangarScreen({ save, shipStats, onBuyUpgrade, onSelectAvatar, onBack }: HangarProps) {
   const styles = useThemedStyles(makeStyles);
+  // The track icons are tinted inline rather than through the sheet — Icon
+  // takes a colour prop, not a style — so this screen needs the chrome itself
+  // as well as its stylesheet.
+  const c = useChrome();
   // Upgrades are per-hull, so the screen needs a hull picker: the row of owned
   // ships doubles as "which one am I investing in".
   const owned = AVATARS.filter((a) => save.unlocked.includes(a.id));
@@ -197,7 +201,7 @@ export function HangarScreen({ save, shipStats, onBuyUpgrade, onSelectAvatar, on
               }}
               style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             >
-              <Icon name={def.icon} size={22} color={PALETTE.plasma} />
+              <Icon name={def.icon} size={22} color={c.accent} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowName}>
                   {def.name}
@@ -338,21 +342,7 @@ const makeStyles = (c: Chrome) =>
       fontFamily: FONTS.display,
       letterSpacing: 4,
     },
-    pressed: { opacity: 0.72 },
-    secondary: {
-      marginTop: 12,
-      paddingVertical: 13,
-      paddingHorizontal: 40,
-      borderRadius: 14,
-      borderWidth: 1.5,
-      borderColor: 'rgba(255,255,255,0.18)',
-    },
-    secondaryTxt: {
-      color: c.ink,
-      fontSize: 14,
-      fontFamily: FONTS.display,
-      letterSpacing: 2,
-    },
+    pressed: { opacity: 0.72 },
     // --- Wallet ---
     wallet: {
       flexDirection: 'row',
@@ -380,7 +370,7 @@ const makeStyles = (c: Chrome) =>
       borderColor: c.edge,
       backgroundColor: c.hull,
     },
-    shipChipActive: { borderColor: PALETTE.plasma },
+    shipChipActive: { borderColor: c.accent },
     shipChipImg: { width: 34, height: 38 },
     shipChipTxt: {
       color: c.inkDim,
@@ -417,11 +407,11 @@ const makeStyles = (c: Chrome) =>
       paddingVertical: 8,
       borderRadius: 10,
       borderWidth: 1.5,
-      borderColor: PALETTE.plasma,
+      borderColor: c.accent,
       alignItems: 'center',
     },
     equipTxt: {
-      color: PALETTE.plasma,
+      color: c.accent,
       fontSize: 11.5,
       fontFamily: FONTS.display,
       letterSpacing: 1.5,
@@ -443,7 +433,7 @@ const makeStyles = (c: Chrome) =>
     rowLevel: { color: c.inkDim, fontSize: 12, fontWeight: '700' },
     rowDesc: { color: c.inkDim, fontSize: 11.5, lineHeight: 15, marginTop: 1 },
     rowPerLevel: {
-      color: PALETTE.plasma,
+      color: c.accent,
       fontSize: 10.5,
       fontFamily: FONTS.display,
       letterSpacing: 0.3,
@@ -457,7 +447,7 @@ const makeStyles = (c: Chrome) =>
       borderRadius: 2,
       backgroundColor: 'rgba(255,255,255,0.14)',
     },
-    pipFilled: { backgroundColor: PALETTE.plasma },
+    pipFilled: { backgroundColor: c.accent },
     priceRow: { alignItems: 'flex-end', gap: 2 },
     priceItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     priceTxt: { color: COIN_GOLD, fontSize: 12, fontWeight: '900' },
@@ -469,7 +459,7 @@ const makeStyles = (c: Chrome) =>
       letterSpacing: 0.5,
       marginTop: 4,
     },
-    buyHintOn: { color: PALETTE.plasma },
+    buyHintOn: { color: c.accent },
     maxed: {
       color: PALETTE.gold,
       fontSize: 12,
@@ -486,7 +476,7 @@ const makeStyles = (c: Chrome) =>
       marginBottom: 10,
     },
     statGroupTitle: {
-      color: PALETTE.plasma,
+      color: c.accent,
       fontSize: 11,
       fontFamily: FONTS.display,
       letterSpacing: 2.5,

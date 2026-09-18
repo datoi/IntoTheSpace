@@ -476,6 +476,34 @@ export function playSystem(event: SystemEvent): void {
   playPitched(v.name, v.volume, v.semis);
 }
 
+/**
+ * Semitones a block is transposed by, given the charges LEFT after it.
+ *
+ * A falling ladder: a full shield answers at pitch, and each spent charge
+ * drops the answer a whole tone, so the last block before a shatter is the
+ * lowest and flattest sound the shell makes. Same information the rim's arcs
+ * carry, routed to the ear — which matters because during a dense pattern the
+ * player's eyes are on the bullets, not on their own hull.
+ *
+ * Exported as a pure function so the ladder can be asserted without a player.
+ */
+export function blockSemitones(left: number, max: number): number {
+  const spent = Math.max(0, Math.min(max, max - left));
+  // Returned explicitly rather than as `-STEP * 0`, which is negative zero —
+  // harmless to the playback rate, but it makes an untouched shield compare
+  // unequal to "no transposition" and that is a confusing thing to debug.
+  return spent === 0 ? 0 : -BLOCK_STEP_SEMIS * spent;
+}
+
+/** Whole tone per charge spent. */
+const BLOCK_STEP_SEMIS = 2;
+
+/** A shell absorbing a hit, pitched by what the shield has left afterwards. */
+export function playBlock(left: number, max: number): void {
+  const v = SYSTEM_VOICE.block;
+  playPitched(v.name, v.volume, v.semis + blockSemitones(left, max));
+}
+
 
 // --- Interface ---------------------------------------------------------------
 

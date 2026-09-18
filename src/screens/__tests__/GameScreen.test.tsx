@@ -16,6 +16,7 @@ import {
   AVATAR_HULL_D,
   SHIELD_RING,
   SHIELD_HITS,
+  SHIELD_BREAK_TIME,
   HEARTS_START,
     ENEMY_SHIPS,
   BOSS_MINI_IMG,
@@ -121,7 +122,6 @@ const renderGame = async (
       avatarSpecial={AVATARS[0].special}
       shipStats={BASE_SHIP_STATS}
       background={BACKGROUNDS[0].set}
-      backgroundId={BACKGROUNDS[0].id}
       resume={resume ?? null}
       onGameOver={onGameOver}
       onPersist={onPersist}
@@ -384,17 +384,21 @@ describe('GameScreen — the shield boon', () => {
     shot: 0,
   });
 
-  /** The hoop's drawn style, or undefined when it isn't on screen. */
+  /**
+   * The shell's drawn style, or undefined when it isn't on screen.
+   *
+   * Found by testID rather than by geometry. It used to match on
+   * `width === SHIELD_RING && borderRadius === SHIELD_RING / 2`, which was fine
+   * while the shield was a single bordered View — but the shell now has inner
+   * layers that legitimately share the wrapper's diameter and radius (the
+   * hardening rim), so the geometry probe matched more than one node and kept
+   * the deepest. That is exactly the kind of incidental coupling a testID
+   * exists to remove.
+   */
   const shieldRing = (): Record<string, any> | undefined => {
-    let found: Record<string, any> | undefined;
-    const walk = (node: any) => {
-      if (!node || typeof node !== 'object') return;
-      const st = Object.assign({}, ...[node.props?.style].flat(Infinity).filter(Boolean));
-      if (st.width === SHIELD_RING && st.borderRadius === SHIELD_RING / 2) found = st;
-      (node.children ?? []).forEach(walk);
-    };
-    walk(screen.toJSON());
-    return found;
+    const node = screen.queryByTestId('shield-shell');
+    if (!node) return undefined;
+    return Object.assign({}, ...[node.props?.style].flat(Infinity).filter(Boolean));
   };
 
   const shielded = (over: Partial<GameState> = {}) =>
@@ -413,6 +417,18 @@ describe('GameScreen — the shield boon', () => {
     expect(centreY).not.toBeCloseTo(AVATAR_Y + AVATAR_SIZE / 2, 1);
   });
 
+  it('offsets its box by half its own diameter, so one centre can serve two shells', async () => {
+    // The shell is handed a CENTRE, not a corner, because the boon and BULWARK
+    // are different diameters and share one pair of animated values. This is
+    // the half that makes that work, and it is the reason the assertion above
+    // adds SHIELD_RING / 2 back.
+    await renderGame(shielded());
+    await advance(50);
+    const st = shieldRing()!;
+    expect(st.top).toBe(-SHIELD_RING / 2);
+    expect(st.left).toBe(-SHIELD_RING / 2);
+  });
+
   it('is wide enough to contain the hull it is drawn around', async () => {
     await renderGame(shielded());
     await advance(50);
@@ -428,6 +444,22 @@ describe('GameScreen — the shield boon', () => {
     // …and spending the last charge ends the shield then and there, rather than
     // it running to the end of its six seconds.
     expect(screen.getByText('SHIELD BROKEN')).toBeTruthy();
+  });
+
+  // This assertion USED to be "the shell is gone the instant the last charge
+  // goes", and it was changed deliberately. Deleting the view on the final hit
+  // meant the break was a disappearance — the most dramatic moment the boon has
+  // simply blinked out. The shell now outlives the boon by SHIELD_BREAK_TIME so
+  // it can be seen coming apart. What must NOT change is that it stops
+  // PROTECTING on that same frame, which the next test pins.
+  it('keeps the shell on screen to break, then clears it', async () => {
+    const shots = Array.from({ length: SHIELD_HITS }, (_, i) => hullShot(900 + i));
+    await renderGame(shielded({ enemyBullets: shots }));
+    await advance(100);
+    // Still drawn, and now visibly breaking rather than protecting.
+    expect(shieldRing()).toBeDefined();
+    // Once the shatter has played out, nothing is left behind.
+    await advance(SHIELD_BREAK_TIME * 1000 + 120);
     expect(shieldRing()).toBeUndefined();
   });
 
@@ -1096,8 +1128,22 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
     // taught a new player "you don't have the good stuff" in their first minute.
     // It now has BULWARK, so the button is live from the first run.
     await renderGame(); // default props equip AVATARS[0] — Ironclad
-    expect(screen.getByText('FIRE')).toBeTruthy();
+    expect(screen.getByTestId('special')).toBeTruthy();
     expect(screen.queryByText('BUY A SHIP')).toBeNull();
+  });
+
+  it('names the equipped ultimate rather than saying FIRE', async () => {
+    // The button is the one place a hull's identity reaches the HUD, and it
+    // used to be the same white "FIRE" on all five. Asserted through the
+    // accessible name because that is also the only name a screen reader gets
+    // now that the glyph carries the meaning.
+    await renderGame();
+    expect(screen.getByTestId('special').props.accessibilityLabel).toBe('BULWARK charging');
+  });
+
+  it('says which state it is in, so the read never depends on colour', async () => {
+    await renderGame(armed());
+    expect(screen.getByTestId('special').props.accessibilityLabel).toBe('BULWARK ready');
   });
 
   it('the meter does NOT fill by waiting — energy is earned', async () => {
@@ -1145,7 +1191,7 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
   it('firing empties the meter and disarms the button', async () => {
     await renderGame(armed(), { avatarSpecial: 'nova' });
     await advance(50);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     // Past the activation freeze AND the on-screen callout, which carries the
     // same words as the armed label.
     await advance(HITSTOP_MS + 1200);
@@ -1156,7 +1202,7 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
     const { onPersist } = await renderGame(armed(), { avatarSpecial: 'nova' });
     await advance(50);
     expect(screen.getByText(SPECIALS.nova.name)).toBeTruthy(); // armed label
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(1200); // outlast the activation callout float
     await fireEvent.press(screen.getByTestId('pause'));
     // Drained — bar the sliver it has already earned back by the time we pause.
@@ -1168,7 +1214,7 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
     await renderGame(armed(), { avatarSpecial: 'phantom' });
     await advance(50);
     expect(countImages(AVATARS[0].image)).toBe(1); // just the ship
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(50);
     expect(countImages(AVATARS[0].image)).toBe(3); // ship + two ghosts
     await advance(PHANTOM_TIME * 1000 + 200);
@@ -1184,7 +1230,7 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
     });
     await renderGame(resume, { avatarSpecial: 'talons' });
     await advance(50);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(HITSTOP_MS + 20); // clear the activation freeze, then one frame
     expect(countShotsOfLength(TALON_LEN)).toBe(TALON_COUNT);
     // Machine gun, not a one-shot: more fans keep coming while it runs.
@@ -1197,7 +1243,7 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
   it('Raptor — the barrage stops on its own and the claws clear out', async () => {
     const { onPersist } = await renderGame(armed(), { avatarSpecial: 'talons' });
     await advance(50);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(TALON_BURST_TIME * 1000 + 1500); // burst ends, last claws fly off
     expect(countShotsOfLength(TALON_LEN)).toBe(0);
     await fireEvent.press(screen.getByTestId('pause'));
@@ -1223,7 +1269,7 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
     });
     const { onPersist } = await renderGame(resume, { avatarSpecial: 'nova' });
     await advance(50);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(HITSTOP_MS + 500);
     expect(countImages(ENEMY_SHIPS[0])).toBe(0); // caught by the wave
     await fireEvent.press(screen.getByTestId('pause'));
@@ -1233,7 +1279,7 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
   it('Nova — the wave expands from the hull, then dissipates and stops', async () => {
     const { onPersist } = await renderGame(armed(), { avatarSpecial: 'nova' });
     await advance(50);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(100);
     await fireEvent.press(screen.getByTestId('pause')); // snapshot mid-blast
     const mid: GameState = onPersist.mock.calls[0][0];
@@ -1251,7 +1297,7 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
     );
     const { onPersist } = await renderGame(armed({ cards: swarm }), { avatarSpecial: 'nova' });
     await advance(50);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     // Long enough for the ring to sweep the whole formation, past the
     // activation freeze.
     await advance(HITSTOP_MS + 500);
@@ -1270,7 +1316,7 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
     const resume = armed({ cards: [card({ lane: 4, y: 90, hp: 1 })] });
     await renderGame(resume, { avatarSpecial: 'spears' });
     await advance(50);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     // The rain launches in waves rather than as one sheet (see SPEAR_RELEASE),
     // so wait out the activation freeze AND the whole release window before
     // counting. The ×1.5 is frame quantization: a 40ms release timer can only
@@ -1306,7 +1352,7 @@ describe('GameScreen — ship specials (the FIRE button)', () => {
     });
     await renderGame(resume, { avatarSpecial: 'talons' });
     await advance(50);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(20);
     expect(countShotsOfLength(TALON_LEN)).toBe(0);
   });

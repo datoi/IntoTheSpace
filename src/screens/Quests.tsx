@@ -364,17 +364,7 @@ const makeStyles = (c: Chrome) =>
       letterSpacing: 4,
       marginBottom: 12,
     },
-    pressed: { opacity: 0.72 },
-    secondary: {
-      marginTop: 10,
-      paddingVertical: 13,
-      paddingHorizontal: 40,
-      borderRadius: 14,
-      borderWidth: 1.5,
-      borderColor: 'rgba(255,255,255,0.18)',
-    },
-    secondaryTxt: { color: c.ink, fontSize: 14,
-      fontFamily: FONTS.display, fontWeight: '800', letterSpacing: 2 },
+    pressed: { opacity: 0.72 },
     tabs: { flexDirection: 'row', alignSelf: 'stretch', gap: 6, marginBottom: 8 },
     tab: {
       flex: 1,
@@ -384,7 +374,7 @@ const makeStyles = (c: Chrome) =>
       borderColor: c.edge,
       alignItems: 'center',
     },
-    tabActive: { backgroundColor: c.hull, borderColor: PALETTE.plasma },
+    tabActive: { backgroundColor: c.hull, borderColor: c.accent },
     tabTxt: { color: c.inkDim, fontSize: 10.5, fontWeight: '900', letterSpacing: 1 },
     tabTxtActive: { color: c.ink },
     list: { alignSelf: 'stretch', flex: 1 },

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, Animated, Easing } from 'react-native';
-import { GunKind, FloatText } from '../game/types';
+import { GunKind, FloatText, SpecialKind } from '../game/types';
 import { ActiveBoons, BOONS, TIMED_BOONS } from '../game/pickups';
 import { bossPhaseCount } from '../game/bosses';
 import {
@@ -14,10 +14,14 @@ import {
   SPECIAL_BTN_RIGHT,
   SPECIAL_BTN_BOTTOM,
   SPECIAL_FILL_EMPTY,
-  SPECIAL_FILL_MID,
-  SPECIAL_FILL_FULL,
-  SPECIAL_READY_EDGE,
   SPECIAL_SURFACE,
+  SPECIAL_GLYPH_SIZE,
+  SPECIAL_GLYPH_SCRIM,
+  SPECIAL_GLYPH_DISC,
+  SPECIAL_GLYPH_DIM,
+  SPECIAL_OVER_RING_INSET,
+  SPECIAL_OVER_RING_W,
+  SPECIALS,
   ENERGY_OVERCHARGE,
   OVERCHARGE_EDGE,
   OVERCHARGE_FILL,
@@ -52,6 +56,38 @@ export function FloatTextView({ f }: { f: FloatText }) {
     </Text>
   );
 }
+
+/**
+ * The HUD's backing — a fade across the top band.
+ *
+ * Regions A, B and D, the pause button and the boss bar all live in the top
+ * ~130px. So does the formation: FORMATION_TOP is 150, an enemy is OB_VIS tall
+ * and an elite's aura is ELITE_AURA_SCALE (1.5×) that, so the top row already
+ * reaches up to y≈112 — through the wallet — and EVERY wave descends through
+ * the whole band on its way in. Over a bright nebula with a red elite sitting
+ * behind it, the altitude readout is simply not legible.
+ *
+ * A fade rather than moving the formation down, deliberately: FORMATION_TOP is
+ * a DIFFICULTY number — it decides how much sky the player gets to react in —
+ * and a readability problem must never be paid for with reaction time.
+ *
+ * Stacked bands rather than a gradient because the project has no gradient
+ * dependency, and react-native-svg is kept out of the play field on purpose
+ * (see PERF_AUDIT.md). Eight static views, mounted once. This component takes
+ * no props, so it renders exactly once per run and costs nothing per frame.
+ */
+const SCRIM_ALPHAS = [0.55, 0.5, 0.44, 0.37, 0.29, 0.2, 0.11, 0.04];
+const SCRIM_BAND_H = 17;
+
+export const TopScrim = React.memo(function TopScrim() {
+  return (
+    <View pointerEvents="none" style={styles.scrimWrap}>
+      {SCRIM_ALPHAS.map((a, i) => (
+        <View key={i} style={[styles.scrimBand, { top: i * SCRIM_BAND_H, opacity: a }]} />
+      ))}
+    </View>
+  );
+});
 
 // --- HUD ---
 // SCORE takes the headline slot: it is the thing that measures how the run is
@@ -394,13 +430,44 @@ export const HealthBar = React.memo(function HealthBar({
 // trick the parallax layers use. Memoized on primitives so this subtree
 // reconciles only when the button actually changes state (locked → charging →
 // ready), not on the parent's per-frame render.
+/**
+ * The FIRE button — the equipped hull's ultimate.
+ *
+ * It wears the SPECIAL'S OWN mark and colour rather than the word FIRE, so the
+ * HUD changes when a hull is bought and not only the stat line. Both come from
+ * SPECIALS, keyed off `kind`, which is also all this component needs to know:
+ * the label, the glyph and the accent are one lookup, and a sixth ship cannot
+ * reach this file without having declared them.
+ *
+ * THREE STATES, AND WHY NONE OF THEM IS ONLY A COLOUR
+ *
+ * A colourblind player has to read this mid-fight, so every state carries a
+ * second, non-colour signal:
+ *
+ *   charging     2px pale rim · glyph dimmed · no name · meter below full
+ *   armed        3px ACCENT rim · glyph at full · the attack is NAMED · throb
+ *   overcharged  3.5px gold rim · a SECOND RING inside it · name gains a "+"
+ *
+ * The inner ring is the one that had to be added: armed and overcharged used
+ * to differ by hue and half a pixel of border, and half a pixel is not a
+ * signal.
+ *
+ * WHAT MUST NOT CHANGE HERE
+ *
+ * `charge` is an Animated.Value the game loop writes with setValue() sixty
+ * times a second, and nothing in this component may pull it onto the React
+ * render path. Everything derived from it is an interpolation built ONCE per
+ * render, and this subtree renders a handful of times a run — when `ready` or
+ * `overcharged` flip, and when the player changes ship.
+ */
 interface SpecialButtonProps {
   charge: Animated.Value; // 0 = empty, 1 = armed, 2 = overcharged; drives level AND colour
   pulse: Animated.Value; // gentle scale throb once it's ready, so it asks to be tapped
   /** Meter banked past full — firing now gives the enhanced version. */
   overcharged: boolean;
   ready: boolean;
-  label: string; // the special's name, shown under FIRE once it's armed
+  /** The equipped hull's ultimate: picks the glyph, the accent and the name. */
+  kind: SpecialKind;
   onPress: () => void;
 }
 
@@ -409,9 +476,10 @@ export const SpecialButton = React.memo(function SpecialButton({
   pulse,
   overcharged,
   ready,
-  label,
+  kind,
   onPress,
 }: SpecialButtonProps) {
+  const special = SPECIALS[kind];
   // One value drives the whole meter. The slab is a full diameter tall and
   // slides up from parked-below into place, so the level and its colour can
   // never drift apart. Built here rather than per frame: the loop only ever
@@ -424,23 +492,45 @@ export const SpecialButton = React.memo(function SpecialButton({
     outputRange: [SPECIAL_BTN_SIZE, 0, 0],
     extrapolate: 'clamp',
   });
+  // White at empty, the ability's own colour at full, amber once banked past
+  // it — so a full button is already wearing what the ability will look like.
   const fillColor = charge.interpolate({
-    inputRange: [0, 0.5, 1, ENERGY_OVERCHARGE],
-    outputRange: [SPECIAL_FILL_EMPTY, SPECIAL_FILL_MID, SPECIAL_FILL_FULL, OVERCHARGE_FILL],
+    inputRange: [0, 1, ENERGY_OVERCHARGE],
+    outputRange: [SPECIAL_FILL_EMPTY, special.accent, OVERCHARGE_FILL],
+    extrapolate: 'clamp',
+  });
+  // The RIM TRACKS THE FILL, and this is a fix rather than a flourish.
+  //
+  // The rim used to be a static colour picked from the `ready`/`overcharged`
+  // booleans, which only flip at charge 1 and charge 2 — while the fill ramps
+  // CONTINUOUSLY from the ability's accent toward the overcharge amber across
+  // that whole band. So for the entire time a player is banking charge (which
+  // is most of the time a button is armed) the button wore two unrelated
+  // colours at once: a teal rim around an amber body on Specter, violet around
+  // amber on Raptor. It read as a rendering fault because, in effect, it was.
+  //
+  // Sharing one input range means rim and fill are always the same hue family:
+  // both sit on the ability's accent at armed, both arrive on gold together.
+  const rimColor = charge.interpolate({
+    inputRange: [0, 1, ENERGY_OVERCHARGE],
+    // Permitted neutral lift (VISUAL_SPEC §3) — the idle rim is not a brand colour.
+    outputRange: ['rgba(255,255,255,0.28)', special.accent, OVERCHARGE_EDGE],
     extrapolate: 'clamp',
   });
   return (
     <Animated.View style={[styles.specialWrap, { transform: [{ scale: pulse }] }]}>
       <Pressable
+        testID="special"
         onPress={onPress}
         disabled={!ready}
         hitSlop={8}
-        style={({ pressed }) => [
-          styles.specialBtn,
-          ready && styles.specialBtnReady,
-          overcharged && styles.specialBtnOver,
-          pressed && styles.specialPressed,
-        ]}
+        accessibilityRole="button"
+        // The glyph replaced the only text this button had, so its name has
+        // to be stated rather than read off a label. State goes in the name
+        // too: a screen reader user gets the same three-way read the rim and
+        // the ring give everyone else.
+        accessibilityLabel={`${special.name}${overcharged ? ' overcharged' : ready ? ' ready' : ' charging'}`}
+        style={({ pressed }) => [styles.specialBtn, pressed && styles.specialPressed]}
       >
         <Animated.View
           pointerEvents="none"
@@ -449,18 +539,62 @@ export const SpecialButton = React.memo(function SpecialButton({
           {/* A bright line riding the top of the fill — the liquid's surface. */}
           <View style={styles.specialSurface} />
         </Animated.View>
-        <Text style={styles.specialTxt}>FIRE</Text>
-        {/* Armed buttons name the attack; an overcharged one advertises that
-            holding on paid off, which is the whole point of banking it. */}
-        {ready && (
-          <Text
-            style={[styles.specialReadyTxt, overcharged && styles.specialOverTxt]}
-            numberOfLines={1}
-          >
-            {overcharged ? `${label} +` : label}
-          </Text>
-        )}
+        {/* The glyph rides a dark disc: the fill slides up THROUGH it and ends
+            on the ability's own colour, which white ink would vanish into. */}
+        <View pointerEvents="none" style={styles.specialGlyph}>
+          <Icon
+            name={special.icon}
+            size={SPECIAL_GLYPH_SIZE}
+            color={PALETTE.ink}
+            opacity={ready ? 1 : SPECIAL_GLYPH_DIM}
+          />
+        </View>
       </Pressable>
+      {/* Armed buttons name the attack; an overcharged one advertises that
+          holding on paid off, which is the whole point of banking it.
+
+          The name sits BELOW the button now, on its own dark pill. It used to
+          be bare ink inside the circle, sharing the flex column with a 46px
+          glyph disc — which left it a few pixels off a 3.5px rim, so it ran
+          into the border. Widening it was not an option either: the longest
+          names are NOVA BURST and SPEAR RAIN, and ten characters cannot fit
+          across a 76px circle at a legible size, which is why the type had
+          been pushed to 8.5px and still clipped.
+
+          Outside the circle it has the whole screen width, so it can go back
+          up to a readable size, it can never collide with the rim, and the
+          glyph gets the button to itself and is finally centred in it. */}
+      {ready && (
+        <View pointerEvents="none" style={styles.specialNameWrap}>
+          <View style={styles.specialNamePill}>
+            <Text
+              style={[styles.specialReadyTxt, overcharged && styles.specialOverTxt]}
+              numberOfLines={1}
+            >
+              {overcharged ? `${special.name} +` : special.name}
+            </Text>
+          </View>
+        </View>
+      )}
+      {/* The rim and the overcharge ring sit OUTSIDE the Pressable, drawn over
+          it. The rim used to be the Pressable's own border, on a view that
+          also has `overflow: hidden` to clip the rising fill — so the fill was
+          clipped to the padding box and left a hairline seam against the
+          inside of the border, which is the ragged edge this button had at
+          every charge level. Drawn as an overlay there is nothing to clip
+          against: the fill runs the full circle and the rim lands on top of it. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.specialRim,
+          ready && styles.specialRimReady,
+          overcharged && styles.specialRimOver,
+          { borderColor: rimColor },
+        ]}
+      />
+      {/* The overcharge ring. A shape the other two states do not have, so
+          the strongest state is legible without reading its colour. */}
+      {overcharged && <View pointerEvents="none" style={styles.specialOverRing} />}
     </Animated.View>
   );
 });
@@ -474,6 +608,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     ...TYPE.title,
     fontSize: 17,
+  },
+  // --- The top fade (see TopScrim) ---
+  scrimWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: SCRIM_ALPHAS.length * SCRIM_BAND_H,
+  },
+  scrimBand: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: SCRIM_BAND_H,
+    backgroundColor: PALETTE.void,
   },
   // --- REGION A: score + reserved chain slot (top-left) ---
   regionA: {
@@ -508,8 +657,14 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginTop: 3,
   },
-  pipRow: { flexDirection: 'row', gap: 2.5, marginTop: 4 },
-  pip: { width: 7, height: 3, borderRadius: 1 },
+  // Enemies-remaining pips are DOTS, not bars, and that is the whole point:
+  // the health bar at the bottom of the screen is a row of threat-red bars,
+  // and a row of threat-red bars up here read as the same object at arm's
+  // length. Both have to stay in the hostile family — one counts things that
+  // can kill you, the other counts how much of you is left — so the thing that
+  // has to differ is the SHAPE. Round means "them", rectangular means "you".
+  pipRow: { flexDirection: 'row', gap: 3, marginTop: 5 },
+  pip: { width: 5, height: 5, borderRadius: 2.5 },
   pipAlive: { backgroundColor: PALETTE.threat },
   pipDead: { backgroundColor: 'rgba(255,255,255,0.15)' },
   // --- Boss bar ---
@@ -630,12 +785,20 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
+  // Depth is secondary, but it still has to be READABLE — inkMute against a
+  // bright nebula (or an elite's aura, which reaches into this region) was
+  // below any usable contrast. One step up the ink ramp plus the same shadow
+  // every other HUD number carries; it stays clearly subordinate to the coins
+  // above it because it is smaller, dimmer and unglyphed.
   alt: {
-    color: PALETTE.inkMute,
+    color: PALETTE.inkDim,
     fontSize: 12,
     fontFamily: FONTS.display,
     letterSpacing: 0.8,
     marginTop: 1,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   // --- Health: discrete, countable segments under the ship ---
   hpWrap: {
@@ -686,10 +849,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   // --- FIRE button ---
+  // Sized explicitly, because the rim and the overcharge ring are now absolute
+  // siblings of the button rather than children of it.
   specialWrap: {
     position: 'absolute',
     right: SPECIAL_BTN_RIGHT,
     bottom: SPECIAL_BTN_BOTTOM,
+    width: SPECIAL_BTN_SIZE,
+    height: SPECIAL_BTN_SIZE,
   },
   specialBtn: {
     width: SPECIAL_BTN_SIZE,
@@ -697,27 +864,32 @@ const styles = StyleSheet.create({
     borderRadius: SPECIAL_BTN_SIZE / 2,
     overflow: 'hidden', // clips the rising fill slab to the circle
     backgroundColor: 'rgba(0,0,0,0.45)',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  specialBtnReady: {
-    borderColor: SPECIAL_READY_EDGE,
-    borderWidth: 3,
+  // The state rim, drawn over the button. Only its WIDTH is a discrete style —
+  // the colour is animated off `charge` so it can never disagree with the fill.
+  specialRim: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: SPECIAL_BTN_SIZE / 2,
+    borderWidth: 2,
   },
-  specialBtnOver: {
-    borderColor: OVERCHARGE_EDGE,
-    borderWidth: 3.5,
-  },
+  specialRimReady: { borderWidth: 3 },
+  specialRimOver: { borderWidth: 3.5 },
   // Parked a full diameter down (empty) and slid up to 0 as the meter fills.
+  // Fully opaque: at 0.9 the ability's accent was being cut with the button's
+  // own black backing, which turned Nova's gold and the overcharge amber into
+  // a muddy brown. The backing's job is to show where the fill ISN'T.
   specialFill: {
     position: 'absolute',
     left: 0,
     right: 0,
     top: 0,
     height: SPECIAL_BTN_SIZE,
-    opacity: 0.9,
   },
   specialSurface: {
     position: 'absolute',
@@ -727,25 +899,56 @@ const styles = StyleSheet.create({
     height: 2.5,
     backgroundColor: SPECIAL_SURFACE,
   },
-  specialTxt: {
-    color: PALETTE.ink,
-    fontSize: 15,
-    fontFamily: FONTS.display,
-    letterSpacing: 1.5,
-    textShadowColor: 'rgba(0,0,0,0.75)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+  // The dark lens the glyph sits on. Centred by the button's own
+  // alignItems/justifyContent, so it needs no offsets of its own.
+  specialGlyph: {
+    width: SPECIAL_GLYPH_DISC,
+    height: SPECIAL_GLYPH_DISC,
+    borderRadius: SPECIAL_GLYPH_DISC / 2,
+    backgroundColor: SPECIAL_GLYPH_SCRIM,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  specialOverRing: {
+    position: 'absolute',
+    left: SPECIAL_OVER_RING_INSET,
+    top: SPECIAL_OVER_RING_INSET,
+    right: SPECIAL_OVER_RING_INSET,
+    bottom: SPECIAL_OVER_RING_INSET,
+    borderRadius: SPECIAL_BTN_SIZE / 2,
+    borderWidth: SPECIAL_OVER_RING_W,
+    borderColor: OVERCHARGE_EDGE,
+  },
+  // Below the button, centred on it, and allowed to overhang on both sides —
+  // the wrap does not clip, so a name wider than the circle is fine.
+  specialNameWrap: {
+    position: 'absolute',
+    top: SPECIAL_BTN_SIZE + 6,
+    left: -24,
+    right: -24,
+    alignItems: 'center',
+  },
+  // The name's backing: a guaranteed dark surface over live gameplay, so the
+  // label reads over a nebula, an explosion or the player's own hull.
+  specialNamePill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(5,7,14,0.62)',
+  },
+  // Gold rather than near-black: the pill guarantees a dark backing now, so
+  // overcharge can reinforce its colour instead of inverting to stay legible.
   specialOverTxt: {
-    color: '#221703',
+    color: PALETTE.goldHi,
   },
+  // Back up to the spec's `micro` size (VISUAL_SPEC §4 sets 10.5 as the floor
+  // for a label) — it was only ever at 8.5 to survive being trapped inside the
+  // circle, and outside it there is no reason to keep it there.
   specialReadyTxt: {
     color: PALETTE.ink,
-    fontSize: 8.5,
+    fontSize: 10.5,
     fontFamily: FONTS.display,
-    letterSpacing: 0.2,
-    marginTop: 1,
-    paddingHorizontal: 4,
+    letterSpacing: 1.1,
   },
   specialPressed: { opacity: 0.7 },
 });
