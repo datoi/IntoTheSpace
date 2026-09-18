@@ -1,35 +1,38 @@
 /**
- * The audio mixer — three player-controlled channels sitting between every
+ * The audio mixer — the player-controlled channels sitting between every
  * sound in the game and the speaker.
  *
- * Kept in its own module rather than inside sounds.ts because MUSIC is not a
- * sound-board concern: music.ts owns one long stream with a lifecycle, the
- * board owns many short buffers fired by the game loop, and both need to read
- * the same three numbers. A module they can both import (and that imports
- * nothing itself) is the only arrangement where neither has to know about the
- * other.
+ * Kept in its own module rather than inside sounds.ts because it imports
+ * NOTHING: the board, the settings panel and the save layer all read the same
+ * numbers, and a module with no dependencies of its own is the one arrangement
+ * where none of them has to know about the others.
+ *
+ * It held a third channel, `music`, until the soundtrack was cut. A slider
+ * that scales a family with no members is worse than no slider — the player
+ * drags it, nothing changes, and every other control on the screen becomes
+ * suspect — so the channel went with it. Stored saves still carrying a
+ * `music` key are harmless: normalizeAudio only reads the channels in CHANNELS.
  *
  * The channel is a MULTIPLIER, never a replacement. Every per-event level in
- * the game — SYSTEM_VOICE's table, the shot throttle's 0.3, MUSIC_BASE — stays
- * exactly where it is and stays the source of truth for how the mix is
- * balanced. This layer only lets the player scale a whole family at once, and
- * at the default of 1 the game sounds bit-for-bit as it always has.
+ * the game — SYSTEM_VOICE's table, the shot throttle's 0.3 — stays exactly
+ * where it is and stays the source of truth for how the mix is balanced. This
+ * layer only lets the player scale a whole family at once, and at the default
+ * of 1 the game sounds bit-for-bit as it always has.
  */
 
 /**
- * The three families a player can actually tell apart.
+ * The families a player can actually tell apart.
  *
  * Deliberately not one knob per board (pickups, system, shots, pops): those
  * are authoring categories, and a settings screen with six sliders is a
- * settings screen nobody touches. These three answer the three real
- * complaints — "the music is too loud", "the game is too loud", "stop
- * clicking at me".
+ * settings screen nobody touches. These two answer the real complaints — "the
+ * game is too loud" and "stop clicking at me".
  */
-export type Channel = 'ui' | 'sfx' | 'music';
+export type Channel = 'ui' | 'sfx';
 
 export type AudioSettings = Record<Channel, number>;
 
-export const CHANNELS: Channel[] = ['ui', 'sfx', 'music'];
+export const CHANNELS: Channel[] = ['ui', 'sfx'];
 
 /**
  * Everything at unity.
@@ -39,7 +42,7 @@ export const CHANNELS: Channel[] = ['ui', 'sfx', 'music'];
  * the game had two competing opinions about how loud it is, and the tables
  * would slowly be retuned to compensate for a number nobody remembered.
  */
-export const DEFAULT_AUDIO: AudioSettings = { ui: 1, sfx: 1, music: 1 };
+export const DEFAULT_AUDIO: AudioSettings = { ui: 1, sfx: 1 };
 
 const gains: AudioSettings = { ...DEFAULT_AUDIO };
 
@@ -67,7 +70,7 @@ export function channelVolume(ch: Channel): number {
   return gains[ch];
 }
 
-/** All three, as a fresh object — safe to hand to React state. */
+/** Every channel, as a fresh object — safe to hand to React state. */
 export function audioSettings(): AudioSettings {
   return { ...gains };
 }
@@ -96,7 +99,7 @@ export function setChannelVolume(ch: Channel, value: number): void {
   emit();
 }
 
-/** Replace all three at once — used when the save lands at boot. */
+/** Replace every channel at once — used when the save lands at boot. */
 export function setAudioSettings(next: Partial<AudioSettings>): void {
   let changed = false;
   for (const ch of CHANNELS) {
@@ -113,9 +116,7 @@ export function setAudioSettings(next: Partial<AudioSettings>): void {
 /**
  * Subscribe to changes. Returns an unsubscribe.
  *
- * Two very different consumers depend on this: music.ts re-applies the volume
- * of the track that is ALREADY PLAYING (a slider that only took effect on the
- * next track would read as broken), and App.tsx persists the result. Neither
+ * The settings panel renders off it and App.tsx persists off it, and neither
  * knows about the other.
  */
 export function onAudioChange(fn: Listener): () => void {
@@ -128,12 +129,11 @@ export function onAudioChange(fn: Listener): () => void {
 /**
  * Testing seam — return to the shipped mix.
  *
- * Deliberately does NOT drop subscribers. music.ts subscribes once at module
- * scope, for the life of the app, so that a slider re-levels the track already
- * playing; a reset that cleared listeners silently disabled that after the
- * first test in a file, which is a seam manufacturing the exact bug it exists
- * to catch. Tests that add their own listener unsubscribe with the function
- * onAudioChange hands back.
+ * Deliberately does NOT drop subscribers: a reset that cleared them would
+ * silently disable any module-scope subscription after the first test in a
+ * file, which is a seam manufacturing the exact bug it exists to catch. Tests
+ * that add their own listener unsubscribe with the function onAudioChange
+ * hands back.
  */
 export function resetMixer(): void {
   Object.assign(gains, DEFAULT_AUDIO);

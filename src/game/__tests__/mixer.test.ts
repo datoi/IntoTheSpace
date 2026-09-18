@@ -15,15 +15,15 @@ afterEach(resetMixer);
 describe('defaults', () => {
   it('ships every channel at unity', () => {
     // Load-bearing, not cosmetic: the per-event level tables (SYSTEM_VOICE,
-    // MUSIC_BASE, the shot volumes) are the tuned mix, and a default below 1
-    // would mean the game had two competing opinions about how loud it is.
+    // the shot volumes) are the tuned mix, and a default below 1 would mean
+    // the game had two competing opinions about how loud it is.
     for (const ch of CHANNELS) expect(DEFAULT_AUDIO[ch]).toBe(1);
   });
 
   it('hands back a copy, so a caller cannot mutate the live gains', () => {
     const snapshot = audioSettings();
-    snapshot.music = 0;
-    expect(channelVolume('music')).toBe(1);
+    snapshot.sfx = 0;
+    expect(channelVolume('sfx')).toBe(1);
   });
 });
 
@@ -38,14 +38,13 @@ describe('setChannelVolume', () => {
   it('leaves the other channels alone', () => {
     setChannelVolume('ui', 0);
     expect(channelVolume('sfx')).toBe(1);
-    expect(channelVolume('music')).toBe(1);
   });
 
   it('notifies subscribers with the new settings', () => {
     const seen = jest.fn();
     onAudioChange(seen);
-    setChannelVolume('music', 0.5);
-    expect(seen).toHaveBeenCalledWith({ ui: 1, sfx: 1, music: 0.5 });
+    setChannelVolume('sfx', 0.5);
+    expect(seen).toHaveBeenCalledWith({ ui: 1, sfx: 0.5 });
   });
 
   it('stays silent when the value has not moved', () => {
@@ -54,8 +53,8 @@ describe('setChannelVolume', () => {
     // persistence effect in App.tsx.
     const seen = jest.fn();
     onAudioChange(seen);
-    setChannelVolume('music', 0.5);
-    setChannelVolume('music', 0.5);
+    setChannelVolume('sfx', 0.5);
+    setChannelVolume('sfx', 0.5);
     expect(seen).toHaveBeenCalledTimes(1);
   });
 
@@ -82,14 +81,14 @@ describe('setAudioSettings', () => {
   it('applies every provided channel in one notification', () => {
     const seen = jest.fn();
     onAudioChange(seen);
-    setAudioSettings({ ui: 0.2, sfx: 0.4, music: 0.6 });
+    setAudioSettings({ ui: 0.2, sfx: 0.4 });
     expect(seen).toHaveBeenCalledTimes(1);
-    expect(audioSettings()).toEqual({ ui: 0.2, sfx: 0.4, music: 0.6 });
+    expect(audioSettings()).toEqual({ ui: 0.2, sfx: 0.4 });
   });
 
   it('ignores channels it was not given', () => {
     setChannelVolume('ui', 0.5);
-    setAudioSettings({ music: 0 });
+    setAudioSettings({ sfx: 0 });
     expect(channelVolume('ui')).toBe(0.5);
   });
 
@@ -111,24 +110,24 @@ describe('normalizeAudio', () => {
   });
 
   it('falls back to unity per channel rather than to zero', () => {
-    expect(normalizeAudio({ ui: NaN, sfx: 'loud', music: 0.5 })).toEqual({
-      ui: 1,
-      sfx: 1,
-      music: 0.5,
-    });
+    expect(normalizeAudio({ ui: NaN, sfx: 'loud' })).toEqual({ ui: 1, sfx: 1 });
   });
 
   it('clamps stored values into range', () => {
-    expect(normalizeAudio({ ui: 9, sfx: -3, music: 0 })).toEqual({ ui: 1, sfx: 0, music: 0 });
+    expect(normalizeAudio({ ui: 9, sfx: -3 })).toEqual({ ui: 1, sfx: 0 });
   });
 
   it('keeps a legitimate zero', () => {
     // Muted is a real choice and must survive a relaunch — the one case where
     // "falsy" and "missing" must not be treated alike.
-    expect(normalizeAudio({ ui: 0, sfx: 0, music: 0 })).toEqual({ ui: 0, sfx: 0, music: 0 });
+    expect(normalizeAudio({ ui: 0, sfx: 0 })).toEqual({ ui: 0, sfx: 0 });
   });
 
   it('ignores keys that are not channels', () => {
     expect(normalizeAudio({ master: 0.1 })).toEqual(DEFAULT_AUDIO);
+    // The real case, not a hypothetical one: every save written before the
+    // soundtrack was cut still carries a `music` gain, and it must drop out
+    // rather than ride along in the object the save layer writes back.
+    expect(normalizeAudio({ ui: 0.5, music: 0.25 })).toEqual({ ui: 0.5, sfx: 1 });
   });
 });

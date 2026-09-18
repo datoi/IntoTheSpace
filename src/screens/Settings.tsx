@@ -17,25 +17,20 @@ import { Button } from '../components/Button';
 import { AudioMixerPanel, MuteAllButton } from '../components/AudioMixer';
 
 interface Props {
-  /**
-   * The equipped sky, so the panel can play its music while the screen is
-   * open. Without it the music slider is a control with nothing to hear.
-   */
-  backgroundId: string;
   onBack: () => void;
 }
 
-export function SettingsScreen({ backgroundId, onBack }: Props) {
+export function SettingsScreen({ onBack }: Props) {
   const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>AUDIO</Text>
       <Text style={styles.subtitle}>
-        Each family is set on its own, so the music can sit under a loud game —
-        or the other way round.
+        Each family is set on its own, so the interface can stay quiet under a
+        loud game — or the other way round.
       </Text>
       <View style={styles.panel}>
-        <AudioMixerPanel previewBg={backgroundId} />
+        <AudioMixerPanel />
         <MuteAllButton />
       </View>
       <View style={styles.spacer} />

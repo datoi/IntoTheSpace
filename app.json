@@ -37,8 +37,7 @@
       "assets/bullets/*.png",
       "assets/effects/*.png",
       "assets/obstacles/*.png",
-      "assets/sounds/*.wav",
-      "assets/music/*.mp3"
+      "assets/sounds/*.wav"
     ],
     "plugins": [
       "expo-font",

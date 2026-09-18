@@ -50,6 +50,12 @@
 // and a haptic, so the length reads as an escalating fight with checkpoints
 // rather than as one long health bar.
 //
+// Subdivision is not a licence for any length, though: a phase is worth only
+// as long as it takes to read its verb and beat it, and a giant was running
+// well past that, so BOSS_GIANT_HP was cut ~40%. The five phases here are
+// unchanged — each one is simply no longer padded out after it has made its
+// point.
+//
 // The chain system does the rest of the work: over a multi-minute fight a chain
 // would decay to nothing on kills alone, because a boss is a single kill. It
 // survives on GRAZES — which these dense patterns supply constantly. So the

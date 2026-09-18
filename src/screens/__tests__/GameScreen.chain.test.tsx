@@ -88,7 +88,6 @@ const renderGame = async (resume?: GameState, extra: Record<string, unknown> = {
       avatarSpecial={AVATARS[0].special}
       shipStats={BASE_SHIP_STATS}
       background={BACKGROUNDS[0].set}
-      backgroundId={BACKGROUNDS[0].id}
       resume={resume ?? null}
       onGameOver={onGameOver}
       onPersist={onPersist}
@@ -300,7 +299,7 @@ describe('hit-stop', () => {
       { avatarSpecial: 'nova' }
     );
     await advance(60);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(HITSTOP_MS + 600);
     const snap = await snapshot(onPersist);
     expect(snap.kills).toBeGreaterThan(6); // the ring did sweep the formation
@@ -332,7 +331,7 @@ describe('earned energy and overcharge', () => {
       { avatarSpecial: 'nova' }
     );
     await advance(60);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(HITSTOP_MS + 60);
     expect((await snapshot(onPersist)).specialCharge).toBeLessThan(0.2);
   });
@@ -345,7 +344,7 @@ describe('Ironclad — BULWARK', () => {
   it('the starter hull can fire a special at all', async () => {
     const { onPersist } = await renderGame(armedIronclad());
     await advance(60);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(HITSTOP_MS + 60);
     const snap = await snapshot(onPersist);
     expect(snap.specialsUsed).toBe(1);
@@ -358,7 +357,7 @@ describe('Ironclad — BULWARK', () => {
     });
     const { onPersist } = await renderGame(resume);
     await advance(60);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(HITSTOP_MS + 700); // long enough for the shot to arrive
     const snap = await snapshot(onPersist);
     expect(snap.hitsTaken).toBe(0);
@@ -371,7 +370,7 @@ describe('Ironclad — BULWARK', () => {
     const resume = armedIronclad({ enemyBullets: incoming });
     const { onPersist } = await renderGame(resume);
     await advance(60);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(HITSTOP_MS + 500);
     const snap = await snapshot(onPersist);
     // The reflect budget was spent, which only happens on absorb.
@@ -388,7 +387,7 @@ describe('Ironclad — BULWARK', () => {
     });
     const { onPersist } = await renderGame(resume);
     await advance(60);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(HITSTOP_MS + 900);
     const snap = await snapshot(onPersist);
     expect(snap.kills).toBeGreaterThan(0);
@@ -398,7 +397,7 @@ describe('Ironclad — BULWARK', () => {
   it('the shell expires on its own timer', async () => {
     const { onPersist } = await renderGame(armedIronclad());
     await advance(60);
-    await fireEvent.press(screen.getByText('FIRE'));
+    await fireEvent.press(screen.getByTestId('special'));
     await advance(HITSTOP_MS + BULWARK_TIME * 1000 + 400);
     expect((await snapshot(onPersist)).bulwarkTime).toBe(0);
   });

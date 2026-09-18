@@ -1,4 +1,4 @@
-// The icon set: 46 glyphs, authored as SVG paths.
+// The icon set: 64 glyphs, authored as SVG paths.
 //
 // Emoji were doing load-bearing UI work in ~40 places, and they are the wrong
 // tool for it: they render differently per OS (Apple and Google art-direct 🔺,
@@ -47,6 +47,17 @@ export type IconName =
   | 'gun-bomb'
   | 'gun-laser'
   | 'gun-homing'
+  // --- Ship ultimates (5) ---
+  // One mark per SpecialKind, worn by the FIRE button, the menu pedestal and
+  // the shop row — see SPECIALS in constants.ts, which is what binds a glyph
+  // to an ability. Prefixed so they sort together and can never be mistaken
+  // for the boon of the same idea ('shield' is a pickup; 'sp-bulwark' is an
+  // ultimate).
+  | 'sp-bulwark'
+  | 'sp-phantom'
+  | 'sp-talons'
+  | 'sp-nova'
+  | 'sp-spears'
   // --- Elite badges (8) ---
   | 'armored'
   | 'rapid'
@@ -56,7 +67,7 @@ export type IconName =
   | 'vampiric'
   | 'swift'
   | 'volatile'
-  // --- Navigation & state (16) ---
+  // --- Navigation & state (15) ---
   | 'play'
   | 'hangar'
   | 'shop'
@@ -70,10 +81,9 @@ export type IconName =
   | 'chevron'
   | 'info'
   | 'settings'
-  // The three mixer channels. Each has to say WHICH FAMILY it governs at 18px
-  // on a settings row, so they are drawn from three different metaphors —
-  // instrument, speaker, finger — rather than three variations on a speaker.
-  | 'music'
+  // The mixer channels. Each has to say WHICH FAMILY it governs at 18px on a
+  // settings row, so they are drawn from different metaphors — speaker,
+  // finger — rather than variations on a speaker.
   | 'sound'
   | 'ui'
   // --- Ribbon marks (3) ---
@@ -244,6 +254,57 @@ const GLYPHS: Record<IconName, (filled: boolean) => React.ReactNode> = {
     </>
   ),
 
+  // --- Ship ultimates: read at 34px inside the FIRE button ---
+  //
+  // Drawn with more room than the elite badges get, because these never
+  // appear at 9px — but held to the same discipline anyway, since the same
+  // glyph also sits at 13px on a shop row. Each one names the VERB of its
+  // ability rather than illustrating its fiction: what the player is about to
+  // do is the thing they need to read off a thumb button mid-fight.
+
+  // A dome taking two hits and throwing them off. Deliberately flat-bottomed
+  // so it cannot be confused with 'shield' or 'shielded', which are both
+  // pointed heraldic shields — this is a shell around the hull, not a crest.
+  'sp-bulwark': () => (
+    <>
+      <Path d="M3.5 18a8.5 8.5 0 0117 0z" />
+      <Path d="M5.5 6.2l2.4 2.4M18.5 6.2l-2.4 2.4" />
+    </>
+  ),
+  // Your hull solid, two ghosts hollow and flying a little behind. Fill is
+  // what separates the real ship from its copies: outline-vs-solid survives
+  // both greyscale and a 13px shop row, where an opacity difference would not.
+  'sp-phantom': () => (
+    <>
+      <Path d="M12 6.4l3.4 6H8.6z" fill="currentColor" />
+      <Path d="M4.8 10.4l2.8 5H2zM19.2 10.4l2.8 5H16.4z" />
+    </>
+  ),
+  // Three claws splaying from one anchor — a foot striking down, not three
+  // parallel slashes, which read as speed lines rather than as a grip.
+  'sp-talons': () => (
+    <Path d="M12 4.2c-3.3 3.6-5.4 7.6-6.4 11.8M12 4.2c-.5 4.4-.5 8.6 0 12.8M12 4.2c3.3 3.6 5.4 7.6 6.4 11.8" />
+  ),
+  // A core with two rings running away from it. The rings are BROKEN into
+  // side arcs rather than drawn closed: a gap reads as a wave travelling,
+  // where two concentric circles read as a target. Distinct from 'volatile',
+  // which is a core with straight rays.
+  'sp-nova': () => (
+    <>
+      <Circle cx={12} cy={12} r={2.4} fill="currentColor" stroke="none" />
+      <Path d="M7.4 8.6a6 6 0 000 6.8M16.6 8.6a6 6 0 010 6.8" />
+      <Path d="M4.2 6.2a9 9 0 000 11.6M19.8 6.2a9 9 0 010 11.6" />
+    </>
+  ),
+  // Three lances falling at staggered heights. Staggering is what makes it
+  // RAIN: three tips on one line would read as a fence.
+  'sp-spears': () => (
+    <>
+      <Path d="M6 3v10.5M12 5.4v10.5M18 3v10.5" />
+      <Path d="M4.3 11.2L6 14.6l1.7-3.4M10.3 13.6L12 17l1.7-3.4M16.3 11.2L18 14.6l1.7-3.4" />
+    </>
+  ),
+
   // --- Elite badges: read at 9px above an enemy ---
   armored: () => (
     <>
@@ -326,13 +387,6 @@ const GLYPHS: Record<IconName, (filled: boolean) => React.ReactNode> = {
       <Circle cx={12} cy={12} r={6.4} />
       <Circle cx={12} cy={12} r={2.6} />
       <Path d="M18.4 12h2.2M16.53 7.47l1.55-1.55M12 5.6V3.4M7.47 7.47L5.92 5.92M5.6 12H3.4M7.47 16.53l-1.55 1.55M12 18.4v2.2M16.53 16.53l1.55 1.55" />
-    </>
-  ),
-  music: () => (
-    <>
-      <Path d="M9 17V6.2l10-2.2V15" />
-      <Circle cx={6.6} cy={17.4} r={2.6} />
-      <Circle cx={16.6} cy={15.4} r={2.6} />
     </>
   ),
   sound: () => (

@@ -2,17 +2,17 @@
 // screen and the pause menu.
 //
 // ONE component for both, because they are the same control in two places and
-// the pause menu is where a player actually notices the music is too loud.
+// the pause menu is where a player actually notices the game is too loud.
 // Two copies would be guaranteed to drift.
 //
 // The slider is hand-rolled on PanResponder rather than pulled from
 // @react-native-community/slider on purpose: that package is a NATIVE module,
 // so adding it costs every contributor a new dev-client build and every
-// release an EAS rebuild — for one screen with three rows. This is ~60 lines,
+// release an EAS rebuild — for one screen with two rows. This is ~60 lines,
 // and it also lets the track wear the app's chrome instead of the platform's.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   AudioSettings,
   Channel,
@@ -22,7 +22,6 @@ import {
   setChannelVolume,
 } from '../game/mixer';
 import { playPop, playUi } from '../game/sounds';
-import { currentMusicBg, pauseMusic, startMusic, stopMusic } from '../game/music';
 import { HapticWeight, haptic } from '../game/haptics';
 import { Chrome } from '../game/theme';
 import { TYPE } from '../game/type';
@@ -154,62 +153,27 @@ function ChannelRow({ channel, label, icon, value, onAudition }: RowProps) {
 }
 
 const ROWS: { channel: Channel; label: string; icon: IconName }[] = [
-  { channel: 'music', label: 'MUSIC', icon: 'music' },
   { channel: 'sfx', label: 'EFFECTS', icon: 'sound' },
   { channel: 'ui', label: 'INTERFACE', icon: 'ui' },
 ];
 
 interface PanelProps {
-  /**
-   * Play this sky's music while the panel is open.
-   *
-   * A music slider with no music playing is a blind control, and music only
-   * runs during a run — so opening this from the menu would otherwise offer a
-   * knob with nothing to hear. Passing the equipped sky auditions it, and
-   * closing restores what was true before: PAUSED if a run already had it
-   * mounted, fully RELEASED if this panel is what started it (those megabytes
-   * should not outlive the screen that borrowed them).
-   */
-  previewBg?: string;
   /** Tighter spacing, for the pause overlay where vertical room is scarce. */
   compact?: boolean;
 }
 
-export function AudioMixerPanel({ previewBg, compact = false }: PanelProps) {
+export function AudioMixerPanel({ compact = false }: PanelProps) {
   const styles = useThemedStyles(makeStyles);
   const settings = useAudioSettings();
-
-  useEffect(() => {
-    if (!previewBg) return;
-    // Whether music was already mounted decides how to leave it — see the note
-    // on `previewBg`.
-    const wasMounted = currentMusicBg() !== null;
-    startMusic(previewBg);
-    // The preview must not outlive the foreground.
-    //
-    // GameScreen pauses music when the RUN pauses, but this panel resumes it
-    // afterwards and behind that effect's back — so with the mixer open,
-    // backgrounding the app would leave the soundtrack playing over whatever
-    // the player switched to. The settings screen has the same hole for the
-    // same reason. Handling it here fixes both, once.
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') startMusic(previewBg);
-      else pauseMusic();
-    });
-    return () => {
-      sub.remove();
-      if (wasMounted) pauseMusic();
-      else stopMusic();
-    };
-  }, [previewBg]);
 
   /**
    * What each channel sounds like, played when the finger lifts.
    *
-   * Music needs nothing: it is already playing and the mixer re-levels the live
-   * track as you drag. The other two are silent until something fires, so they
-   * audition a representative voice — the kill pop is the loudest thing the sfx
-   * channel routinely carries, and the tap IS the ui channel.
+   * Both channels are silent until something fires, so each auditions a
+   * representative voice — the kill pop is the loudest thing the sfx channel
+   * routinely carries, and the tap IS the ui channel. Without an audition the
+   * panel would be a pair of blind controls: drag, hear nothing, and leave the
+   * screen none the wiser about what you just set.
    */
   const audition = useCallback((channel: Channel) => {
     if (channel === 'sfx') playPop(3);
@@ -230,13 +194,13 @@ export function AudioMixerPanel({ previewBg, compact = false }: PanelProps) {
  *
  * Worth its own control because "silence the game right now" is a different
  * intent from "balance the mix", and a player reaching for it (someone walked
- * in, the train got quiet) should not have to drag three sliders to zero.
+ * in, the train got quiet) should not have to drag every slider to zero.
  */
 export function MuteAllButton() {
   const styles = useThemedStyles(makeStyles);
   const c = useChrome();
   const s = useAudioSettings();
-  const silent = s.music <= 0 && s.sfx <= 0 && s.ui <= 0;
+  const silent = s.sfx <= 0 && s.ui <= 0;
   // Restoring goes to unity rather than to "whatever it was before": keeping a
   // pre-mute snapshot would need somewhere to live across screens and app
   // launches, and unity is the shipped mix — the one level every player can

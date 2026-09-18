@@ -113,9 +113,9 @@ describe('loadSave', () => {
 
 describe('audio settings', () => {
   it('round-trips a changed mix', async () => {
-    await writeSave({ ...sampleSave, audio: { ui: 0, sfx: 0.5, music: 0.25 } });
+    await writeSave({ ...sampleSave, audio: { ui: 0, sfx: 0.5 } });
     const save = await loadSave();
-    expect(save.audio).toEqual({ ui: 0, sfx: 0.5, music: 0.25 });
+    expect(save.audio).toEqual({ ui: 0, sfx: 0.5 });
   });
 
   it('reads a save written before the mixer existed as the shipped mix', async () => {
@@ -127,7 +127,7 @@ describe('audio settings', () => {
     delete legacy.audio;
     await AsyncStorage.setItem(SAVE_KEY, JSON.stringify(legacy));
     const save = await loadSave();
-    expect(save.audio).toEqual({ ui: 1, sfx: 1, music: 1 });
+    expect(save.audio).toEqual({ ui: 1, sfx: 1 });
   });
 
   it('repairs a corrupt mix rather than inheriting a NaN', async () => {
@@ -135,10 +135,10 @@ describe('audio settings', () => {
     // slider reads 'NaN%' and no arithmetic on it recovers.
     await AsyncStorage.setItem(
       SAVE_KEY,
-      JSON.stringify({ ...sampleSave, audio: { ui: null, sfx: 4, music: 'loud' } })
+      JSON.stringify({ ...sampleSave, audio: { ui: null, sfx: 4 } })
     );
     const save = await loadSave();
-    expect(save.audio).toEqual({ ui: 1, sfx: 1, music: 1 });
+    expect(save.audio).toEqual({ ui: 1, sfx: 1 });
   });
 });
 

@@ -11,14 +11,6 @@ jest.mock('../../game/sounds', () => ({
   playPop: jest.fn(),
 }));
 
-// The panel starts the equipped sky's music so the slider has something to be
-// heard against; none of that is what these tests are about.
-jest.mock('../../game/music', () => ({
-  startMusic: jest.fn(),
-  pauseMusic: jest.fn(),
-  stopMusic: jest.fn(),
-  currentMusicBg: jest.fn(() => null),
-}));
 
 const mockPlayUi = playUi as jest.Mock;
 
@@ -76,11 +68,13 @@ describe('press feedback', () => {
 
 describe('AudioMixerPanel', () => {
   it('shows one control per channel, reading the live mixer', async () => {
-    setChannelVolume('music', 0.5);
+    setChannelVolume('sfx', 0.5);
     await render(<AudioMixerPanel />);
-    expect(screen.getByTestId('volume-music').props.accessibilityValue.now).toBe(50);
-    expect(screen.getByTestId('volume-sfx').props.accessibilityValue.now).toBe(100);
+    expect(screen.getByTestId('volume-sfx').props.accessibilityValue.now).toBe(50);
     expect(screen.getByTestId('volume-ui').props.accessibilityValue.now).toBe(100);
+    // The soundtrack is gone, and a slider that scales a family with no
+    // members would be a control the player can prove does nothing.
+    expect(screen.queryByTestId('volume-music')).toBeNull();
   });
 
   it('follows a change made somewhere else', async () => {
@@ -105,16 +99,15 @@ describe('MuteAllButton', () => {
   it('silences every channel at once', async () => {
     await render(<MuteAllButton />);
     fireEvent.press(screen.getByTestId('mute-all'));
-    expect(audioSettings()).toEqual({ ui: 0, sfx: 0, music: 0 });
+    expect(audioSettings()).toEqual({ ui: 0, sfx: 0 });
   });
 
   it('restores to the shipped mix, and proves it audibly', async () => {
     setChannelVolume('ui', 0);
     setChannelVolume('sfx', 0);
-    setChannelVolume('music', 0);
     await render(<MuteAllButton />);
     fireEvent.press(screen.getByTestId('mute-all'));
-    expect(audioSettings()).toEqual({ ui: 1, sfx: 1, music: 1 });
+    expect(audioSettings()).toEqual({ ui: 1, sfx: 1 });
     // A restore with no sound leaves the player unsure it worked.
     expect(mockPlayUi).toHaveBeenCalledWith('tap');
   });

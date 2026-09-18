@@ -37,7 +37,13 @@ import {
 import { FONT_MAP } from './src/game/type';
 import { preloadAssets } from './src/game/preload';
 import { initSounds } from './src/game/sounds';
-import { AudioSettings, audioSettings, onAudioChange, setAudioSettings } from './src/game/mixer';
+import {
+  AudioSettings,
+  CHANNELS,
+  audioSettings,
+  onAudioChange,
+  setAudioSettings,
+} from './src/game/mixer';
 import { GamePhase, GameState, RunResult } from './src/game/types';
 import { chromeFor } from './src/game/theme';
 import { PALETTE, AVATARS, BACKGROUNDS, DECODE_GRACE_MS, MIN_LOADING_MS, FONT_GRACE_MS } from './src/game/constants';
@@ -58,6 +64,18 @@ const DEV_UNLOCK_ALL = __DEV__ && process.env.NODE_ENV !== 'test';
  * it (the unmount path flushes anyway — this is about the common case).
  */
 const AUDIO_WRITE_DEBOUNCE_MS = 400;
+
+/**
+ * Whether two mixes are the same, compared over whatever channels the mixer
+ * currently has.
+ *
+ * Written against CHANNELS rather than naming the channels here, because the
+ * list has already changed once (`music` went with the soundtrack) and a name
+ * left behind compares undefined to undefined — which reads as "unchanged"
+ * and silently stops persisting a change the player really made.
+ */
+const sameAudio = (a: AudioSettings, b: AudioSettings): boolean =>
+  CHANNELS.every((ch) => a[ch] === b[ch]);
 
 export default function App() {
   const [phase, setPhase] = useState<GamePhase>('menu');
@@ -121,9 +139,9 @@ export default function App() {
       saveRef.current = loaded;
       setSave(loaded);
       // Hand the stored volumes to the mixer before anything can play. The
-      // mixer is the runtime source of truth (the game loop and music module
-      // read it directly, outside React), and the save is only its durable
-      // copy — so this is the one direction the data flows at boot.
+      // mixer is the runtime source of truth (the game loop reads it directly,
+      // outside React), and the save is only its durable copy — so this is the
+      // one direction the data flows at boot.
       setAudioSettings(loaded.audio);
       setPausedRun(run);
       await preloadAssets((done, total) => {
@@ -202,11 +220,7 @@ export default function App() {
     const unsubscribe = onAudioChange((next: AudioSettings) => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        persist((prev) =>
-          prev.audio.ui === next.ui && prev.audio.sfx === next.sfx && prev.audio.music === next.music
-            ? prev
-            : { ...prev, audio: next }
-        );
+        persist((prev) => (sameAudio(prev.audio, next) ? prev : { ...prev, audio: next }));
       }, AUDIO_WRITE_DEBOUNCE_MS);
     });
     return () => {
@@ -215,9 +229,7 @@ export default function App() {
       // the app immediately must not lose the change they just made.
       persist((prev) => {
         const live = audioSettings();
-        return prev.audio.ui === live.ui && prev.audio.sfx === live.sfx && prev.audio.music === live.music
-          ? prev
-          : { ...prev, audio: live };
+        return sameAudio(prev.audio, live) ? prev : { ...prev, audio: live };
       });
       unsubscribe();
     };
@@ -480,7 +492,6 @@ export default function App() {
               avatarSpecial={selectedAvatar.special}
               shipStats={shipStats}
               background={selectedBackground.set}
-              backgroundId={selectedBackground.id}
               resume={pausedRun}
               startPaused={!!pausedRun}
               onGameOver={handleGameOver}
@@ -520,12 +531,7 @@ export default function App() {
           />
         )}
         {phase === 'stats' && <StatsScreen save={save} onBack={() => setPhase('menu')} />}
-        {phase === 'settings' && (
-          <SettingsScreen
-            backgroundId={selectedBackground.id}
-            onBack={() => setPhase('menu')}
-          />
-        )}
+        {phase === 'settings' && <SettingsScreen onBack={() => setPhase('menu')} />}
         {phase === 'quests' && (
           <QuestsScreen
             save={save}
