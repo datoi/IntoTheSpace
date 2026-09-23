@@ -76,6 +76,68 @@ export const SOUND_NAMES = Object.keys(sources) as SoundName[];
 const players: Partial<Record<SoundName, AudioPlayer>> = {};
 let ready = false;
 
+/**
+ * How every player is built, and why these two options are not defaults.
+ *
+ * `keepAudioSessionActive` — THE important one, and the fix for a whole-game
+ * stutter. expo-audio defaults it to FALSE, which means each player's
+ * `onPlaybackComplete` calls `deactivateSession()`, and that schedules
+ * `AVAudioSession.setActive(false, [.notifyOthersOnDeactivation])`. Meanwhile
+ * every `play()` calls `setActive(true)` from the JS thread. So a game firing
+ * short effects continuously thrashes the iOS audio session dozens of times a
+ * second — and `setActive` is a synchronous IPC to `mediaserverd`, the single
+ * most expensive call in iOS audio. Measured effect: frames of 150–370ms with
+ * an almost empty board, alternating between a blocked JS thread (the sync
+ * activate) and a blocked main thread (mediaserverd contention). Muting the
+ * game made every one of them disappear. Holding the session open turns the
+ * activate into a cheap no-op and stops the deactivate entirely.
+ *
+ * `updateInterval` — each player runs a status-polling loop that emits an
+ * event to JS while it is playing. Nothing in this game ever reads playback
+ * status (the one thing that did was the soundtrack, and that is gone), so at
+ * the 500ms default that is pure bridge traffic across the whole board. Pushed
+ * out to a minute; it cannot be disabled outright.
+ */
+const PLAYER_OPTIONS = {
+  keepAudioSessionActive: true,
+  updateInterval: 60_000,
+} as const;
+
+/**
+ * Minimum gap between two starts of the SAME sample.
+ *
+ * `playGraze` and `playShot` were each given a throttle when this class of
+ * problem was last looked at; the KILL path never got one, and it is the one
+ * that fires in bursts. A detonation resolves every enemy on screen in a
+ * single synchronous pass, and because `playKill` maps a low chain to `pop1`,
+ * twelve kills meant twelve `seekTo(0)`/`play()` pairs on ONE player inside
+ * one tick — twelve audio-session round trips for a sound the player hears
+ * once.
+ *
+ * Two frames at 60fps. Wide enough to collapse a same-tick burst, far too
+ * narrow to touch ordinary play: kills during a normal wave are hundreds of
+ * milliseconds apart, so the chain pitch ladder still reads exactly as before.
+ *
+ * It also sounds BETTER. Twelve copies of one sample started microseconds
+ * apart phase-cancel into mush; a nuke should make one clean sound, not twelve
+ * small identical ones fighting each other.
+ */
+export const SAMPLE_MIN_GAP_MS = 32;
+
+/** Last start time per sample, and the last volume actually written to it. */
+let lastFiredAt: Partial<Record<SoundName, number>> = {};
+let lastVolume: Partial<Record<SoundName, number>> = {};
+
+/** Injectable clock, so the budget is testable without real timers. */
+let clock: () => number = () => Date.now();
+
+/** Testing seam — reset the budget and (optionally) drive it from a fake clock. */
+export function resetSoundBudget(now: () => number = () => Date.now()): void {
+  clock = now;
+  lastFiredAt = {};
+  lastVolume = {};
+}
+
 export async function initSounds(): Promise<void> {
   if (ready) return;
   try {
@@ -97,7 +159,7 @@ export async function initSounds(): Promise<void> {
   // says which one failed.
   (Object.keys(sources) as SoundName[]).forEach((name) => {
     try {
-      players[name] = createAudioPlayer(sources[name]);
+      players[name] = createAudioPlayer(sources[name], PLAYER_OPTIONS);
     } catch (e) {
       if (__DEV__) console.warn(`[sounds] could not load "${name}" — that effect will be silent`, e);
     }
@@ -158,8 +220,21 @@ function fire(name: SoundName, volume: number): void {
   if (volume <= 0) return;
   const p = players[name];
   if (!p) return;
+  // One start per sample per SAMPLE_MIN_GAP_MS. The first request in a window
+  // wins rather than the last, because latency is what a hit sound is for —
+  // deferring it to coalesce would trade the bug for a mushy one.
+  const now = clock();
+  const prev = lastFiredAt[name];
+  if (prev !== undefined && now - prev < SAMPLE_MIN_GAP_MS) return;
+  lastFiredAt[name] = now;
   try {
-    p.volume = volume;
+    // Tracked locally rather than compared against `p.volume`: reading that
+    // property is itself a native call (a BLOCKING one on Android, which hops
+    // to the UI thread and waits), so asking costs more than it saves.
+    if (lastVolume[name] !== volume) {
+      p.volume = volume;
+      lastVolume[name] = volume;
+    }
     p.seekTo(0);
     p.play();
   } catch {

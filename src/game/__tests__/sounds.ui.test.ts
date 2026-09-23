@@ -5,6 +5,7 @@ import {
   play,
   playPickup,
   playUi,
+  resetSoundBudget,
   resetUiThrottle,
   uiSemitones,
   type UiEvent,
@@ -35,6 +36,10 @@ const playerFor = (name: (typeof SOUND_NAMES)[number]) =>
 beforeEach(() => {
   resetMixer();
   resetUiThrottle();
+  // The per-sample budget is module state and real-time based, so back-to-back
+  // assertions on ONE sample would otherwise be collapsed by it — see
+  // resetUiThrottle directly above, which exists for the same reason.
+  resetSoundBudget();
   playerFor('ui_tap').play.mockClear();
   playerFor('ui_confirm').play.mockClear();
   playerFor('ui_deny').play.mockClear();

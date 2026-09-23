@@ -1,8 +1,17 @@
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
-import { initSounds, play, playPop, playShot, SOUND_NAMES } from '../sounds';
+import { initSounds, play, playPop, playShot, resetSoundBudget, SOUND_NAMES } from '../sounds';
 
 const mockCreate = createAudioPlayer as jest.Mock;
 const mockSetMode = setAudioModeAsync as jest.Mock;
+
+// Every test in this file is about ROUTING — which sample a call reaches, at
+// what pitch and what volume — not about the per-sample budget, which has its
+// own suite. A clock that advances a second per reading puts every call in its
+// own window, so the budget can never collapse two assertions into one here.
+beforeEach(() => {
+  let t = 0;
+  resetSoundBudget(() => (t += 1000));
+});
 
 // sounds.ts keeps module state (ready flag + players), so tests share one
 // initialized module; order-independent assertions only.
